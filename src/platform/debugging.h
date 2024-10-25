@@ -109,7 +109,9 @@ static void addDebugMessage(const CHAR16* msg)
     RELEASE(debugLogLock);
     if (debugLogOnlyMainProcessorRunning)
     {
+        debugLogOnlyMainProcessorRunning = false;
         printDebugMessages();
+        debugLogOnlyMainProcessorRunning = true;
     }
 }
 
@@ -130,7 +132,9 @@ static void addDebugMessageAssert(const CHAR16* message, const CHAR16* file, con
     RELEASE(debugLogLock);
     if (debugLogOnlyMainProcessorRunning)
     {
+        debugLogOnlyMainProcessorRunning = false;
         printDebugMessages();
+        debugLogOnlyMainProcessorRunning = true;
     }
 }
 
