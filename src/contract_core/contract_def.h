@@ -153,6 +153,18 @@ struct __FunctionOrProcedureBeginEndGuard
 #include "contracts/Qearn.h"
 #endif
 
+#undef CONTRACT_INDEX
+#undef CONTRACT_STATE_TYPE
+#undef CONTRACT_STATE2_TYPE
+
+#ifndef NO_QNS
+#define QNS_CONTRACT_INDEX 10
+#define CONTRACT_INDEX QNS_CONTRACT_INDEX
+#define CONTRACT_STATE_TYPE QNS
+#define CONTRACT_STATE2_TYPE QNS2
+#include "contracts/QNS.h"
+#endif
+
 #define MAX_CONTRACT_ITERATION_DURATION 0 // In milliseconds, must be above 0; for now set to 0 to disable timeout, because a rollback mechanism needs to be implemented to properly handle timeout
 
 #undef INITIALIZE
@@ -207,6 +219,7 @@ constexpr struct ContractDescription
 #ifndef NO_QEARN
     {"QEARN", 137, 10000, sizeof(QEARN)}, // proposal in epoch 135, IPO in 136, construction in 137 / first donation after END_EPOCH, first round in epoch 138
 #endif
+    {"QNS", 136, 10000, sizeof(QNS)}, // proposal in epoch 135, IPO in 136, construction in 137 / first donation after END_EPOCH, first round in epoch 138
 };
 
 constexpr unsigned int contractCount = sizeof(contractDescriptions) / sizeof(contractDescriptions[0]);
@@ -294,4 +307,5 @@ static void initializeContracts()
 #ifndef NO_QEARN
     REGISTER_CONTRACT_FUNCTIONS_AND_PROCEDURES(QEARN);
 #endif
+    REGISTER_CONTRACT_FUNCTIONS_AND_PROCEDURES(QNS);
 }
