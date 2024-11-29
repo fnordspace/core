@@ -181,9 +181,9 @@ struct QNS : public ContractBase {
 
   // Register the user functions and procedures
   REGISTER_USER_FUNCTIONS_AND_PROCEDURES
+    REGISTER_USER_FUNCTION(lookup, 1);
     REGISTER_USER_PROCEDURE(registerName, 1);
     REGISTER_USER_PROCEDURE(update, 2);
-    REGISTER_USER_FUNCTION(lookup, 3);
     REGISTER_USER_PROCEDURE(transferOwnership, 4);
   _
 };
