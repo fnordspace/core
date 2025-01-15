@@ -85,6 +85,7 @@ struct QNS : public ContractBase {
   // // lookup (function)
 
   struct lookup_input {
+      uint32 query;
       //   QNSName query;
   };
 
@@ -152,14 +153,15 @@ struct QNS : public ContractBase {
 
   // Function to lookup the Qubic ID and URL by name
   PUBLIC_FUNCTION(lookup)
-    // Check if the name is registered
-    // if (!state.nameToID.get(input.query, output.value))
-    // {
-    //     output.returnCode = false; // Name not found return;
-    // }
+    //  Check if the name is registered
+  //if (!state.nameToID.get(input.query, output.value))
+    if (!(input.query == 19))
+    {
+        output.returnCode = 40; // Name not found return;
+        return;
+    }
 
-    // output.returnCode = true; // Lookup successful
-    output.returnCode = 15;
+    output.returnCode = 20; // Lookup successful
   _
 
   /***** ownerTransfer *****/
