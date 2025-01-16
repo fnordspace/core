@@ -58,6 +58,7 @@ struct QNS : public ContractBase {
   // Mapping from names to Qubic IDs
   // QPI::collection<QPI::id, 1024> nameToID;
   // QPI::HashMap<QNSName, QNSEntry, 1024> nameToID;
+    QPI::Array<uint8, 128> exampleString;
 
   /**************************************/
   /********INPUT AND OUTPUT STRUCTS******/
@@ -91,6 +92,7 @@ struct QNS : public ContractBase {
 
   struct lookup_output {
       uint32 returnCode;
+      Array<uint8, 128> returnString;
     // QNSEntry value;
     // sint32 returnCode;
   };
@@ -154,15 +156,32 @@ struct QNS : public ContractBase {
   // Function to lookup the Qubic ID and URL by name
   PUBLIC_FUNCTION(lookup)
     //  Check if the name is registered
-  //if (!state.nameToID.get(input.query, output.value))
-    if (!(input.query == 19))
+    // if (!state.exampleMap.get(input.query, output.returnCode))
+    if(true)
     {
-        output.returnCode = 40; // Name not found return;
+        output.returnCode = 99; // Name not found return;
+        output.returnString.setAll(0);
+        output.returnString.set(0, 'h');
+        output.returnString.set(1, 'e');
+        output.returnString.set(2, 'l');
+        output.returnString.set(3, 'l');
+        output.returnString.set(4, 'o');
         return;
     }
-
-    output.returnCode = 20; // Lookup successful
   _
+
+
+  // struct INITIALIZE_LOCALS{
+  //     char t1[265];
+  //     char t2[265];
+  // };
+
+  // INITIALIZE_WITH_LOCALS
+  //   locals.t1 = {'h', 'e', 'l', 'l', 'o','\0'};
+  //   locals.t2 = {'h', 'o', 'l', 'a','\0'};
+  //   state.exampleMap.set(locals.t1, 42);
+  //   state.exampleMap.set(locals.t2, 19);
+  // _
 
   /***** ownerTransfer *****/
 
