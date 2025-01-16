@@ -87,6 +87,7 @@ struct QNS : public ContractBase {
 
   struct lookup_input {
       uint32 query;
+      Array<uint8, 128> queryString;
       //   QNSName query;
   };
 
@@ -159,13 +160,9 @@ struct QNS : public ContractBase {
     // if (!state.exampleMap.get(input.query, output.returnCode))
     if(true)
     {
-        output.returnCode = 99; // Name not found return;
+        output.returnCode = input.query; // Name not found return;
         output.returnString.setAll(0);
-        output.returnString.set(0, 'h');
-        output.returnString.set(1, 'e');
-        output.returnString.set(2, 'l');
-        output.returnString.set(3, 'l');
-        output.returnString.set(4, 'o');
+        output.returnString.setMem(input.queryString);
         return;
     }
   _
