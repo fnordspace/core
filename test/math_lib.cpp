@@ -1,5 +1,6 @@
 #include "gtest/gtest.h"
 
+#include <cmath> // For INFINITY and FP_NAN 
 #include "../src/contracts/math_lib.h"
 
 TEST(TestCoreMathLib, Max) {
