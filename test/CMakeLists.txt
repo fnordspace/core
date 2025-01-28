@@ -30,6 +30,10 @@ endif()
 
 add_compile_options(-mavx -mavx2)
 
+add_compile_options(
+    -fshort-wchar # Use 16bit chars
+    -mrdrnd #random intrinsics
+)
 
 enable_testing()
 
@@ -46,7 +50,7 @@ add_executable(
   # kangaroo_twelve.cpp
   m256.cpp
   math_lib.cpp
-  # network_messages.cpp
+  network_messages.cpp
   # platform.cpp
   # qpi_collection.cpp
   # qpi.cpp
