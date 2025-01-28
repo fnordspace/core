@@ -1,6 +1,12 @@
 #pragma once
 
+
+#if defined(_MSC_VER)
 #include <intrin.h>
+#else
+#include <immintrin.h>
+#endif
+
 #include "debugging.h"
 
 // Lock that allows multiple readers but only one writer.

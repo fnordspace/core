@@ -15,14 +15,51 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
 
+message(STATUS "Compiler ID: ${CMAKE_CXX_COMPILER_ID}")
+message(STATUS "Compiler Path: ${CMAKE_CXX_COMPILER}")
+
+
+# Allow the user to enable AVX-512
+option(ENABLE_AVX512 "Enable AVX-512 instructions" ON)
+
+if (ENABLE_AVX512)
+    add_compile_options(-mavx512f -mavx512cd -mavx512vl -mavx512bw -mavx512dq)
+else()
+    message(STATUS "AVX-512 is disabled. If you would like to activate make sure you set ENABLE_AVX512 to ON while running cmake.")
+endif()
+
+add_compile_options(-mavx -mavx2)
+
+
 enable_testing()
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../src)
 
 add_executable(
   qubic_core_tests
+  # assets.cpp
+  # common_def.cpp
+  # contract_core.cpp
+  # contract_qearn.cpp
+  # contract_qvault.cpp
+  # contract_qx.cpp
+  # kangaroo_twelve.cpp
+  m256.cpp
   math_lib.cpp
+  # network_messages.cpp
+  # platform.cpp
+  # qpi_collection.cpp
+  # qpi.cpp
+  # qpi_hash_map.cpp
+  # score_cache.cpp
+  # score.cpp
+  # spectrum.cpp
+   stdlib_impl.cpp
+  # tick_storage.cpp
+  # tx_status_request.cpp
+  # vote_counter.cpp
 )
+
 target_link_libraries(
   qubic_core_tests
   GTest::gtest_main

@@ -1,6 +1,12 @@
 #pragma once
 
+#include <cstdint>
+
+#if defined(_MSC_VER)
 #include <intrin.h>
+#else
+#include <immintrin.h>
+#endif
 
 #ifdef NO_UEFI
 #include <cstdio>
