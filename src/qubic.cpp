@@ -4552,7 +4552,7 @@ static void updateVotesCount(unsigned int& tickNumberOfComputors, unsigned int& 
                             KangarooTwelve64To32(saltedData, &saltedDigest);
                             if (tick->saltedComputerDigest == saltedDigest)
                             {
-                                saltedData[0] = etalonTick.saltedTransactionBodyDigest;
+                                saltedData[1] = etalonTick.saltedTransactionBodyDigest;
                                 KangarooTwelve64To32(saltedData, &saltedDigest);
                                 if(tick->saltedTransactionBodyDigest == saltedDigest)
                                 {
@@ -6008,7 +6008,7 @@ static void processKeyPresses()
             appendText(message, L".");
             logToConsole(message);
 
-            setText(message, L"Computer digest = ");
+            setText(message, L"TxBody digest = ");
             getIdentity(etalonTick.saltedTransactionBodyDigest.m256i_u8, digestChars, true);
             appendText(message, digestChars);
             appendText(message, L".");
