@@ -280,6 +280,7 @@ static struct
     RequestResponseHeader header;
     RequestedTickTransactions requestedTickTransactions;
 } requestedTickTransactions;
+static volatile char requestedTickTransactionsLock = 0;
 
 static struct {
     unsigned char day;
@@ -4338,11 +4339,13 @@ static void prepareNextTickTransactions()
     const unsigned int nextTickIndex = ts.tickToIndexCurrentEpoch(nextTick);
 
     nextTickTransactionsSemaphore = 1; // signal a flag for displaying on the console log
+    ACQUIRE(requestedTickTransactionsLock);
     bs->SetMem(requestedTickTransactions.requestedTickTransactions.transactionFlags, sizeof(requestedTickTransactions.requestedTickTransactions.transactionFlags), 0);
+    RELEASE(requestedTickTransactionsLock);
     unsigned long long unknownTransactions[NUMBER_OF_TRANSACTIONS_PER_TICK / 64];
     bs->SetMem(unknownTransactions, sizeof(unknownTransactions), 0);
     const auto* tsNextTickTransactionOffsets = ts.tickTransactionOffsets.getByTickIndex(nextTickIndex);
-    
+
     // This function maybe called multiple times per tick due to lack of data (txs or votes)
     // Here we do a simple pre scan to check txs via tsNextTickTransactionOffsets (already processed - aka already copying from pendingTransaction array to tickTransaction)
     for (unsigned int i = 0; i < NUMBER_OF_TRANSACTIONS_PER_TICK; i++)
@@ -4465,7 +4468,9 @@ static void prepareNextTickTransactions()
             {
                 if (!(unknownTransactions[i >> 6] & (1ULL << (i & 63))))
                 {
+                    ACQUIRE(requestedTickTransactionsLock);
                     requestedTickTransactions.requestedTickTransactions.transactionFlags[i >> 3] |= (1 << (i & 7));
+                    RELEASE(requestedTickTransactionsLock);
                 }
             }
         }
@@ -6698,13 +6703,15 @@ EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemTable)
                         pushToAny(&requestedTickData.header);
                     }
 
+                    ACQUIRE(requestedTickTransactionsLock);
                     if (requestedTickTransactions.requestedTickTransactions.tick)
                     {
                         requestedTickTransactions.header.randomizeDejavu();
-                        pushToAny(&requestedTickTransactions.header);
 
+                        pushToAny(&requestedTickTransactions.header);
                         requestedTickTransactions.requestedTickTransactions.tick = 0;
                     }
+                    RELEASE(requestedTickTransactionsLock);
                 }
 
                 // Add messages from response queue to sending buffer
