@@ -29,8 +29,7 @@ struct Tick
 
     m256i transactionDigest;
     m256i expectedNextTickTransactionDigest;
-
-    m256i saltedTransactionBodyDigest;
+    m256i expectedNextTickTransactionBodyDigest;
 
     unsigned char signature[SIGNATURE_SIZE];
 };

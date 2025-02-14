@@ -130,6 +130,7 @@ static VoteCounter voteCounter;
 static TickData nextTickData;
 
 static m256i uniqueNextTickTransactionDigests[NUMBER_OF_COMPUTORS];
+static m256i uniqueNextTickTransactionBodyDigests[NUMBER_OF_COMPUTORS];
 static unsigned int uniqueNextTickTransactionDigestCounters[NUMBER_OF_COMPUTORS];
 
 static unsigned long long resourceTestingDigest = 0;
@@ -730,7 +731,7 @@ static void processBroadcastTick(Peer* peer, RequestResponseHeader* header)
                     || request->tick.saltedUniverseDigest != tsTick->saltedUniverseDigest
                     || request->tick.saltedComputerDigest != tsTick->saltedComputerDigest
                     || request->tick.transactionDigest != tsTick->transactionDigest
-                    || request->tick.saltedTransactionBodyDigest != tsTick->saltedTransactionBodyDigest
+                    || request->tick.expectedNextTickTransactionBodyDigest != tsTick->expectedNextTickTransactionBodyDigest
                     || request->tick.expectedNextTickTransactionDigest != tsTick->expectedNextTickTransactionDigest)
                 {
                     faultyComputorFlags[request->tick.computorIndex >> 6] |= (1ULL << (request->tick.computorIndex & 63));
@@ -4177,7 +4178,7 @@ static void updateFutureTickCount()
 // find next tick data digest from next tick votes
 // Scan all tick votes of the next tick (system.tick + 1):
 // if there are 451+ (QUORUM) votes agree on the same transactionDigest - or 226+ (VETO) votes agree on empty tick
-// then next tick digest is known (from the point of view of the node) - targetNextTickDataDigest
+// => nextTickDataDigest is known (from the point of view of the node) - targetNextTickDataDigest
 static void findNextTickDataDigestFromNextTickVotes()
 {
     const unsigned int nextTick = system.tick + 1;
@@ -4254,7 +4255,8 @@ static void findNextTickDataDigestFromCurrentTickVotes()
             unsigned int j;
             for (j = 0; j < numberOfUniqueNextTickTransactionDigests; j++)
             {
-                if (tsCompTicks[i].expectedNextTickTransactionDigest == uniqueNextTickTransactionDigests[j])
+                if (tsCompTicks[i].expectedNextTickTransactionDigest == uniqueNextTickTransactionDigests[j]
+                    && tsCompTicks[i].expectedNextTickTransactionBodyDigest == uniqueNextTickTransactionBodyDigests[j])
                 {
                     break;
                 }
@@ -4262,6 +4264,7 @@ static void findNextTickDataDigestFromCurrentTickVotes()
             if (j == numberOfUniqueNextTickTransactionDigests)
             {
                 uniqueNextTickTransactionDigests[numberOfUniqueNextTickTransactionDigests] = tsCompTicks[i].expectedNextTickTransactionDigest;
+                uniqueNextTickTransactionBodyDigests[numberOfUniqueNextTickTransactionDigests] = tsCompTicks[i].expectedNextTickTransactionBodyDigest;
                 uniqueNextTickTransactionDigestCounters[numberOfUniqueNextTickTransactionDigests++] = 1;
             }
             else
@@ -4483,48 +4486,23 @@ static void computeTxBodyDigestBase(const int tick)
     const unsigned int tickIndex = ts.tickToIndexCurrentEpoch(tick);
     const auto* tsTransactionOffsets = ts.tickTransactionOffsets.getByTickIndex(tickIndex);
 
-
-    int numTx = 0; // Counter for debuging
-    int numTxTd = 0; // Counter for debuging
-    CHAR16 digestChars[60 + 1];
-
-    if(logK12)
-    {
-        for(const auto &tx : nextTickData.transactionDigests)
-        {
-            if(!isZero(tx))
-            {
-                numTxTd++;
-                setText(message, L"txtd ");
-                appendNumber(message, numTxTd, false);
-                getIdentity(tx.m256i_u8, digestChars, true);
-                appendText(message, digestChars);
-                appendText(message, L".");
-                addDebugMessage(message);
-            }
-        }
-
-        setText(message, L"tickdata tx: ");
-        appendNumber(message, numTxTd, TRUE);
-        appendText(message, L".");
-        addDebugMessage(message);
-    }
-
-    for (unsigned int i = 0; i < NUMBER_OF_TRANSACTIONS_PER_TICK; i++)
+   for (unsigned int i = 0; i < NUMBER_OF_TRANSACTIONS_PER_TICK; i++)
     {
         if (!isZero(nextTickData.transactionDigests[i]))
         {
             // TODO: Optimization to check: We have the ts locked for the whole K12_Update.
             //       It might be worth to copy the transaction and release lock before update the K12 state.
             // TODO: Here we check each Tx against the nextTickData again (before we did it in prepareNextTickTransactions
-            //       Might be worth to do only do it once by saving flagging/removing tx which are in ts.tickTransactions
+            //       Might be worth to only do it once by saving flagging/removing tx which are in ts.tickTransactions
             //       but not in nextTickData
             ts.tickTransactions.acquireLock();
 
-            if (tsTransactionOffsets[i]) {
+            if (tsTransactionOffsets[i])
+            {
                 const Transaction* transaction = ts.tickTransactions(tsTransactionOffsets[i]);
 
-                if (transaction->checkValidity() && transaction->tick == tick) {
+                if (transaction->checkValidity() && transaction->tick == tick)
+                {
                     unsigned char digest[32];
                     KangarooTwelve(transaction, transaction->totalSize(), digest, sizeof(digest));
                     if (digest == nextTickData.transactionDigests[i])
@@ -4535,24 +4513,12 @@ static void computeTxBodyDigestBase(const int tick)
                             ret = XKCP::KangarooTwelve_Update(&kt, reinterpret_cast<const unsigned char *>(transaction), transaction->totalSize());
                             if (ret == 0)
                             {
-                                numTx++;
                                 break;
-                            }
-                            else
-                            {
-                                setText(message, L"!!!!!!!!!!!!!XKCP FAILED!!!!!!!!!");
-                                addDebugMessage(message);
                             }
                         }
                     }
                 }
-                else
-                {
-                    setText(message, L"!!!!!!!!!!!!!TX FAILED VALIDATION!!!!!!!!!");
-                    addDebugMessage(message);
-                }
             }
-
             ts.tickTransactions.releaseLock();
         }
     }
@@ -4560,22 +4526,8 @@ static void computeTxBodyDigestBase(const int tick)
     int ret = 1;
     while(ret == 1)
     {
-        ret = XKCP::KangarooTwelve_Final(&kt, etalonTick.saltedTransactionBodyDigest.m256i_u8, (const unsigned char *)"", 0);
-        if(ret == 1)
-        {
-            setText(message, L"!!!!!!!!!!!!!XKCP FINALIZE FAILED!!!!!!!!!");
-            addDebugMessage(message);
-        }
+        ret = XKCP::KangarooTwelve_Final(&kt, etalonTick.expectedNextTickTransactionBodyDigest.m256i_u8, (const unsigned char *)"", 0);
     }
-
-    if(logK12)
-    {
-        setText(message, L"Hashed tx: ");
-        appendNumber(message, numTx, TRUE);
-        appendText(message, L".");
-        addDebugMessage(message);
-    }
-    //return digest;
 }
 
 
@@ -4603,9 +4555,6 @@ static void broadcastTickVotes()
         saltedData[1] = etalonTick.saltedComputerDigest;
         KangarooTwelve64To32(saltedData, &broadcastTick.tick.saltedComputerDigest);
 
-        saltedData[1] = etalonTick.saltedTransactionBodyDigest;
-        KangarooTwelve64To32(saltedData, &broadcastTick.tick.saltedTransactionBodyDigest);
-
         unsigned char digest[32];
         KangarooTwelve(&broadcastTick.tick, sizeof(Tick) - SIGNATURE_SIZE, digest, sizeof(digest));
         broadcastTick.tick.computorIndex ^= BroadcastTick::type;
@@ -4617,18 +4566,6 @@ static void broadcastTickVotes()
         // - if own votes don't get echoed back, that indicates this node has internet/topo issue, and need to reissue vote (F9)
         // - all votes need to be processed in a single place of code (for further handling)
         // - all votes are treated equally (own votes and their votes)
-    }
-
-    if(logVote)
-    {
-        setText(message, L"Broadcast vote for tick: ");
-        appendNumber(message, broadcastTick.tick.tick, TRUE);
-        appendText(message, L" txBodyDiges: ");
-        CHAR16 digestChars[60 + 1];
-        getIdentity(etalonTick.saltedTransactionBodyDigest.m256i_u8, digestChars, true);
-        appendText(message, digestChars);
-        appendText(message, L".");
-        addDebugMessage(message);
     }
 }
 
@@ -4674,15 +4611,10 @@ static void updateVotesCount(unsigned int& tickNumberOfComputors, unsigned int& 
                             KangarooTwelve64To32(saltedData, &saltedDigest);
                             if (tick->saltedComputerDigest == saltedDigest)
                             {
-                                saltedData[1] = etalonTick.saltedTransactionBodyDigest;
-                                KangarooTwelve64To32(saltedData, &saltedDigest);
-                                if(tick->saltedTransactionBodyDigest == saltedDigest)
-                                {
-                                    tickNumberOfComputors++;
-                                    // to avoid submitting invalid votes (eg: all zeroes with valid signature)
-                                    // only count votes that matched etalonTick
-                                    voteCounter.registerNewVote(tick->tick, tick->computorIndex);
-                                }
+                                tickNumberOfComputors++;
+                                // to avoid submitting invalid votes (eg: all zeroes with valid signature)
+                                // only count votes that matched etalonTick
+                                voteCounter.registerNewVote(tick->tick, tick->computorIndex);
                             }
                         }
                     }
@@ -4949,30 +4881,27 @@ static void tickProcessor(void*)
                         {
                             // if this node is faster than most, targetNextTickDataDigest is unknown at this point because of lack of votes
                             // Thus, expectedNextTickTransactionDigest it not updated yet
+                            // If it targetNextTickDataDigest is known expectedNextTickTransactionDigest is set above already.
                             KangarooTwelve(&nextTickData, sizeof(TickData), &etalonTick.expectedNextTickTransactionDigest, 32);
                         }
                     }
                     else
                     {
                         etalonTick.expectedNextTickTransactionDigest = m256i::zero();
+                        etalonTick.expectedNextTickTransactionBodyDigest = m256i::zero();
                     }
 
 
                     if (system.tick > system.latestCreatedTick || system.tick == system.initialTick)
                     {
-                        computeTxBodyDigestBase(nextTick); //Sets etalonTick
+                        if( nextTickData.epoch == system.epoch)
+                        {
+                            computeTxBodyDigestBase(nextTick); //Sets etalonTick
+                        }
 
                         if (mainAuxStatus & 1)
                         {
                             broadcastTickVotes();
-                        }
-
-                        // Avoid spamming votes after initial tick
-                        if (system.tick != system.initialTick)
-                        {
-                            system.latestCreatedTick = system.tick;
-                            logVote = true;
-                            logK12 = true;
                         }
                     }
 
@@ -6045,66 +5974,6 @@ static void processKeyPresses()
         switch (key.ScanCode)
         {
 
-        case 0x0B:
-        {
-            const unsigned int tickIndex = ts.tickToIndexCurrentEpoch(etalonTick.tick);
-            const auto *tsTransactionOffsets =
-                ts.tickTransactionOffsets.getByTickIndex(tickIndex);
-
-            int numTx = 0;
-            for (unsigned int i = 0; i < NUMBER_OF_TRANSACTIONS_PER_TICK; i++)
-            {
-                numTx++;
-                ts.tickTransactions.acquireLock();
-
-                if (tsTransactionOffsets[i]) {
-                    const Transaction *transaction =
-                        ts.tickTransactions(tsTransactionOffsets[i]);
-                    if (transaction->checkValidity() && transaction->tick == etalonTick.tick)
-                        {
-
-                            const Transaction *transaction = ts.tickTransactions(tsTransactionOffsets[i]);
-
-                            CHAR16 digestChars[60 + 1];
-                            setText(message, L"Tx ");
-                            appendNumber(message, i, false);
-                            appendText(message, L": ");
-
-                            unsigned char digest[32];
-                            KangarooTwelve(transaction, transaction->totalSize(), digest, sizeof(digest));
-                            getIdentity(digest, digestChars, true);
-                            appendText(message, digestChars);
-                            appendText(message, L".\n");
-                            logToConsole(message);
-                    }
-                }
-                ts.tickTransactions.releaseLock();
-            }
-            setText(message, L"Num Tx: ");
-            appendNumber(message, numTx,false);
-            logToConsole(message);
-
-            setText(message, L"TX Diges: ");
-            logToConsole(message);
-
-            for (unsigned int i = 0; i < NUMBER_OF_TRANSACTIONS_PER_TICK; i++)
-            {
-
-                if (!isZero(nextTickData.transactionDigests[i]))
-                {
-                    CHAR16 digestChars[60 + 1];
-                    setText(message, L"TxTickData ");
-                    appendNumber(message, i, false);
-                    appendText(message, L": ");
-
-                    getIdentity(&nextTickData.transactionDigests[i].m256i_u8[0], digestChars, true);
-                    appendText(message, digestChars);
-                    appendText(message, L".\n");
-                    logToConsole(message);
-                }
-            }
-        }
-        break;
         /*
         *
         * F2 Key
@@ -6195,7 +6064,7 @@ static void processKeyPresses()
             logToConsole(message);
 
             setText(message, L"TxBody digest = ");
-            getIdentity(etalonTick.saltedTransactionBodyDigest.m256i_u8, digestChars, true);
+            getIdentity(etalonTick.expectedNextTickTransactionBodyDigest.m256i_u8, digestChars, true);
             appendText(message, digestChars);
             appendText(message, L".");
             logToConsole(message);
