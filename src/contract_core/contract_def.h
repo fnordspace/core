@@ -217,11 +217,30 @@ constexpr unsigned short QNS_CONTRACT_INDEX = (CONTRACT_INDEX + 1);
 #undef CONTRACT_INDEX
 #undef CONTRACT_STATE_TYPE
 #undef CONTRACT_STATE2_TYPE
+#define QNS_CONTRACT_INDEX 12
 #define CONTRACT_INDEX QNS_CONTRACT_INDEX
 #define CONTRACT_STATE_TYPE QNS
 #define CONTRACT_STATE2_TYPE QNS2
 #include "contracts/QNS.h"
-#endif
+
+// #ifdef INCLUDE_CONTRACT_TEST_EXAMPLES
+// constexpr unsigned short TESTEXA_CONTRACT_INDEX = (CONTRACT_INDEX + 1);
+// #undef CONTRACT_INDEX
+// #undef CONTRACT_STATE_TYPE
+// #undef CONTRACT_STATE2_TYPE
+// #define CONTRACT_INDEX TESTEXA_CONTRACT_INDEX
+// #define CONTRACT_STATE_TYPE TESTEXA
+// #define CONTRACT_STATE2_TYPE TESTEXA2
+// #include "contracts/TestExampleA.h"
+// constexpr unsigned short TESTEXB_CONTRACT_INDEX = (CONTRACT_INDEX + 1);
+// #undef CONTRACT_INDEX
+// #undef CONTRACT_STATE_TYPE
+// #undef CONTRACT_STATE2_TYPE
+// #define CONTRACT_INDEX TESTEXB_CONTRACT_INDEX
+// #define CONTRACT_STATE_TYPE TESTEXB
+// #define CONTRACT_STATE2_TYPE TESTEXB2
+// #include "contracts/TestExampleB.h"
+
 
 #define MAX_CONTRACT_ITERATION_DURATION 0 // In milliseconds, must be above 0; for now set to 0 to disable timeout, because a rollback mechanism needs to be implemented to properly handle timeout
 
@@ -238,6 +257,7 @@ constexpr unsigned short QNS_CONTRACT_INDEX = (CONTRACT_INDEX + 1);
 // The following are included after the contracts to keep their definitions and dependencies
 // inaccessible for contracts
 #include "qpi_collection_impl.h"
+#include "qpi_hash_map_impl.h"
 #include "qpi_trivial_impl.h"
 
 #include "platform/global_var.h"
@@ -278,14 +298,12 @@ constexpr struct ContractDescription
     {"QVAULT", 138, 10000, sizeof(IPO)}, // proposal in epoch 136, IPO in 137, construction and first use in 138
     {"MSVAULT", 149, 10000, sizeof(MSVAULT)}, // proposal in epoch 147, IPO in 148, construction and first use in 149
     {"QBAY", 154, 10000, sizeof(QBAY)}, // proposal in epoch 152, IPO in 153, construction and first use in 154
+    {"QNS", 138, 10000, sizeof(QNS)},
     // new contracts should be added above this line
 #ifdef INCLUDE_CONTRACT_TEST_EXAMPLES
     {"TESTEXA", 138, 10000, sizeof(IPO)},
     {"TESTEXB", 138, 10000, sizeof(IPO)},
     {"TESTEXC", 138, 10000, sizeof(IPO)},
-#endif
-#if !defined NO_QNS
-    {"QNS", 140, 10000, sizeof(QNS)},
 #endif
 };
 
@@ -377,13 +395,11 @@ static void initializeContracts()
     REGISTER_CONTRACT_FUNCTIONS_AND_PROCEDURES(QVAULT);
     REGISTER_CONTRACT_FUNCTIONS_AND_PROCEDURES(MSVAULT);
     REGISTER_CONTRACT_FUNCTIONS_AND_PROCEDURES(QBAY);
+    REGISTER_CONTRACT_FUNCTIONS_AND_PROCEDURES(QNS);
     // new contracts should be added above this line
 #ifdef INCLUDE_CONTRACT_TEST_EXAMPLES
     REGISTER_CONTRACT_FUNCTIONS_AND_PROCEDURES(TESTEXA);
     REGISTER_CONTRACT_FUNCTIONS_AND_PROCEDURES(TESTEXB);
     REGISTER_CONTRACT_FUNCTIONS_AND_PROCEDURES(TESTEXC);
-#endif
-#if !defined NO_QNS
-    REGISTER_CONTRACT_FUNCTIONS_AND_PROCEDURES(QNS);
 #endif
 }
