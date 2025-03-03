@@ -10,7 +10,7 @@ using namespace QPI;
 // // Datatype for the Name that is used in QNS e.g. myAwesomeName.qubic
 // //using QNSName = uint8[QNS_NAME_LENGTH];
 // using QNSOwner = QPI::id;
-// using IPFSHash = m256i;
+using IPFSHash = m256i;
 
 
 // int compareMemory(const void* ptr1, const void* ptr2, unsigned long long num) {
@@ -33,19 +33,19 @@ using namespace QPI;
 // };
 
 
-// Structure of each entry behind the lookup.
-// struct QNSEntry {
-//   // Name of the entry. Potentially needed to check for hash collisions
-//   QNSName name;
-//   // Id to look up
-//   QPI::id id;
-//   // Owner
-//   QNSOwner owner;
-//   // ipfs hash
-//   IPFSHash ipfs;
-//   // Expiration date
-//   QPI::uint8 expiration;
-// };
+//Structure of each entry behind the lookup.
+struct QNSEntry {
+  // Name of the entry. Potentially needed to check for hash collisions
+  //QNSName name;
+  // Id to look up
+  QPI::id id;
+  // Owner
+  QPI::id  owner;
+  // ipfs hash
+  // IPFSHash ipfs;
+  // Expiration date
+  //QPI::uint8 expiration;
+};
 
 struct QNS2 {};
 
@@ -58,14 +58,16 @@ struct QNS : public ContractBase
 
   // Mapping from names to Qubic IDs
   // QPI::collection<QPI::id, 1024> nameToID;
-    QPI::HashMap<bit_1024, uint32, 1024> exampleMap;
+    QPI::HashMap<bit_1024, QNSEntry, 1024> lookupMap;
 
 
     struct QNSLogger
     {
         uint32 _contractIndex;
         uint32 _type;
-        QPI::id invoker;
+        QPI::id originator;
+        QPI::id id;
+        QPI::id owner;
         sint8 _terminator;
     };
 
@@ -78,7 +80,7 @@ struct QNS : public ContractBase
     struct registerName_input {
         //QNSEntry entry;
         QPI::bit_1024 name;
-        QPI::uint32 value;
+        QNSEntry entry;
     };
 
     struct registerName_output {
@@ -107,7 +109,7 @@ struct QNS : public ContractBase
     struct lookup_output {
         sint32 returnCode;
         //Array<uint8, 128> returnString;
-        uint32 returnValue;
+        QNSEntry returnEntry;
         // QNSEntry value;
         // sint32 returnCode;
     };
@@ -133,20 +135,28 @@ struct QNS : public ContractBase
 
         locals.logger._contractIndex = CONTRACT_INDEX;
         locals.logger._type = 0;
-        locals.logger.invoker = qpi.invocator();
+        locals.logger.originator = qpi.originator();
+        locals.logger.id = input.entry.id;
+        locals.logger.owner = input.entry.owner;
         LOG_INFO(locals.logger);
         // Check if the name is already registered
-        if (state.exampleMap.getElementIndex(input.name) != QPI::NULL_INDEX)
+        if (state.lookupMap.getElementIndex(input.name) != QPI::NULL_INDEX)
         {
             // Name already registered
             output.returnCode = -1;
+            return;
         }
-        else
+
+        // Check if entries Owner matches the originator
+        if(input.entry.owner != qpi.originator())
         {
-            // Register the name
-            state.exampleMap.set(input.name, input.value);
-            output.returnCode = 0;
+            // TODO: Discuss if it shall be allowed that the originator is not the owner while registe a new domain
+            output.returnCode = -1;
         }
+
+        // Register the name
+        state.lookupMap.set(input.name, input.entry);
+        output.returnCode = 0;
     _
 
 
@@ -176,7 +186,7 @@ struct QNS : public ContractBase
     // Function to lookup the Qubic ID and URL by name
     PUBLIC_FUNCTION(lookup)
         //  Check if the name is registered
-        if (state.exampleMap.get(input.queryString, output.returnValue))
+        if (state.lookupMap.get(input.queryString, output.returnEntry))
         {
             // Name was found
             output.returnCode = 0;
@@ -184,7 +194,7 @@ struct QNS : public ContractBase
         else
         {
             // Name not found
-            output.returnValue = 0;
+            // TODO: What to return if no entry is found
             output.returnCode = -1;
         }
     _
