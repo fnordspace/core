@@ -1,39 +1,17 @@
-// #include "contracts/qpi.h"
 #include "qpi.h"
 using namespace QPI;
-// #include "../contract_core/qpi_hash_map_impl.h"
 // Qubic Name Service Contract
 
-
-// constexpr unsigned long long QNS_NAME_LENGTH = 256;
-
-// // Datatype for the Name that is used in QNS e.g. myAwesomeName.qubic
-// //using QNSName = uint8[QNS_NAME_LENGTH];
-// using QNSOwner = QPI::id;
-using IPFSHash = m256i;
+// TODO:
+// - SubDomains
+// - Fees
+// - domainname normalization and sanitazing (e.g., toLower, check for \0 and other special chars, emojis)
 
 
-// int compareMemory(const void* ptr1, const void* ptr2, unsigned long long num) {
-//     const unsigned char* p1 = static_cast<const unsigned char*>(ptr1);
-//     const unsigned char* p2 = static_cast<const unsigned char*>(ptr2);
-//     for (unsigned long long i = 0; i < num; ++i) {
-//         if (p1[i] != p2[i]) {
-//             return p1[i] - p2[i];
-//         }
-//     }
-//     return 0;
-// }
 
-// struct QNSName {
-//   unsigned char name[QNS_NAME_LENGTH];
-  
-//     bool operator==(const QNSName& other) const {
-//         return compareMemory(name, other.name, QNS_NAME_LENGTH) == 0;
-//     }
-// };
+using IPFSHash = QPI::BitArray<256>; // 32 Byte IPF CID
 
-
-//Structure of each entry behind the lookup.
+// Basic struct of a Entry in the QNS Registry
 struct QNSEntry {
   // Name of the entry. Potentially needed to check for hash collisions
   //QNSName name;
@@ -42,7 +20,7 @@ struct QNSEntry {
   // Owner
   QPI::id  owner;
   // ipfs hash
-  // IPFSHash ipfs;
+  IPFSHash ipfsCID;
   // Expiration date
   //QPI::uint8 expiration;
 };
@@ -59,7 +37,7 @@ struct QNS : public ContractBase
   // Mapping from names to Qubic IDs
   // QPI::collection<QPI::id, 1024> nameToID;
     QPI::HashMap<bit_1024, QNSEntry, 1024> lookupMap;
-
+    uint64 numberOfEntries;
 
     struct QNSLogger
     {
@@ -90,21 +68,26 @@ struct QNS : public ContractBase
     struct registerName_locals {
         QNSLogger logger;
     };
-    // // Update
 
-    // struct update_input {
-    //   QNSEntry entry;
-    // };
-
-    // struct update_output {
-    //   sint32 returnCode;
-    // };
-    // // lookup (function)
-
-    struct lookup_input {
-        bit_1024 queryString;
-        //   QNSName query;
+    // Update
+    struct update_input {
+      QPI::bit_1024 name;
+      QNSEntry entry;
     };
+
+    struct update_output {
+      sint32 returnCode;
+    };
+
+    struct update_locals {
+        QNSEntry entry;
+        QNSLogger logger;
+    };
+
+    // Lookup
+    struct lookup_input {
+        bit_1024 name;
+    } ;
 
     struct lookup_output {
         sint32 returnCode;
@@ -114,15 +97,6 @@ struct QNS : public ContractBase
         // sint32 returnCode;
     };
 
-    // transferOwnership
-
-    // struct transferOwnership_input {
-    //   QNSEntry entry;
-    // };
-
-    // struct transferOwnership_output {
-    //   sint32 returnCode;
-    // };
 
     /**************************************/
     /************CORE FUNCTIONS************/
@@ -130,7 +104,7 @@ struct QNS : public ContractBase
 
     /***** registerName *****/
 
-    // Procedure to register a new name with a Qubic ID and URL
+    // Register a new domain
     PUBLIC_PROCEDURE_WITH_LOCALS(registerName)
 
         locals.logger._contractIndex = CONTRACT_INDEX;
@@ -162,31 +136,39 @@ struct QNS : public ContractBase
 
     // /***** update *****/
 
-    // struct update_locals {
-    //   QNSEntry value;
-    // };
+    // Update the entry of a registered domain
+    PUBLIC_PROCEDURE_WITH_LOCALS(update)
+        // Check if name is registered
+        locals.logger._contractIndex = CONTRACT_INDEX;
+        locals.logger._type = 1;
+        locals.logger.originator = qpi.originator();
+        locals.logger.id = input.entry.id;
+        locals.logger.owner = input.entry.owner;
+        LOG_INFO(locals.logger);
+        if (!state.lookupMap.get(input.name, locals.entry))
+        {
+            // Entry not found
+            output.returnCode = -1;
+            return;
+        }
+        // Check if originator is the owner of the domain
+        if(locals.entry.owner != qpi.originator())
+        {
+            // originator is not the owner - no update possible
+            output.returnCode = -1;
+            return;
+        }
 
-    // // Procedure to update the ID of a registered name
-    // PUBLIC_PROCEDURE_WITH_LOCALS(update)
-    //   // Check if the name is registered and the invocator is the owner
-    //   // If entry is found value will have the value of the found entry (See
-    //   // QPI::HashMap)
-    //   if (state.nameToID.get(input.entry.name, locals.value) && locals.value.owner != qpi.invocator()) // TODO check if rather originator is needed?
-    //   {
-    //       output.returnCode = -1;  // Name not registered or not owned by invocator
-    //       return;
-    //   }
-
-    //   state.nameToID.set(input.entry.name, input.entry);
-    //   output.returnCode = 0; // Update successful
-    // _
+        state.lookupMap.set(input.name, input.entry);
+        output.returnCode = 0;
+    _
 
     /****** lookup *****/
 
-    // Function to lookup the Qubic ID and URL by name
+    // Lookup the entry of a domain
     PUBLIC_FUNCTION(lookup)
         //  Check if the name is registered
-        if (state.lookupMap.get(input.queryString, output.returnEntry))
+        if (state.lookupMap.get(input.name, output.returnEntry))
         {
             // Name was found
             output.returnCode = 0;
@@ -199,31 +181,17 @@ struct QNS : public ContractBase
         }
     _
 
-    /***** ownerTransfer *****/
 
-    // struct transferOwnership_locals {
-    //   QNSEntry value;
-    // };
+    INITIALIZE
+        state.numberOfEntries = 0;
+    _
 
-    // // Function to transfer ownership of a name
-    // PUBLIC_PROCEDURE_WITH_LOCALS(transferOwnership)
-    //   // Check if the name is registered and the invocator is the owner
-    //   if (state.nameToID.get(input.entry.name, locals.value) && locals.value.owner != qpi.invocator()) {
-    //       output.returnCode = -1; // Name not registered or not owned by invocator
-    //       return;
-    //   }
-
-    //   // Transfer ownership
-    //   // Actually it is a update of all fields
-    //   state.nameToID.set(input.entry.name, locals.value);
-    //   output.returnCode = 0; // Ownership transfer successful
-    // _
 
     // Register the user functions and procedures
     REGISTER_USER_FUNCTIONS_AND_PROCEDURES
         REGISTER_USER_FUNCTION(lookup, 1);
         REGISTER_USER_PROCEDURE(registerName, 1);
-        // REGISTER_USER_PROCEDURE(update, 2);
+        REGISTER_USER_PROCEDURE(update, 2);
         // REGISTER_USER_PROCEDURE(transferOwnership, 4);
     _
 
