@@ -30,7 +30,6 @@
 
 #include "text_output.h"
 
-#include "K12/kangaroo_twelve_xkcp.h"
 #include "kangaroo_twelve.h"
 #include "four_q.h"
 #include "score.h"
@@ -89,6 +88,7 @@ struct Processor : public CustomStack
     Peer* peer;
     void* buffer;
 };
+
 
 
 
@@ -153,7 +153,7 @@ const unsigned long long contractStateDigestsSizeInBytes = sizeof(contractStateD
 static bool targetNextTickDataDigestIsKnown = false;
 static m256i targetNextTickDataDigest;
 static m256i lastExpectedTickTransactionDigest;
-static Transaction g_txBodies[MAX_TRANSACTION_SIZE * NUMBER_OF_TRANSACTIONS_PER_TICK];
+static unsigned char g_txBodies[MAX_TRANSACTION_SIZE * NUMBER_OF_TRANSACTIONS_PER_TICK];
 // rdtsc (timestamp) of ticks
 static unsigned long long tickTicks[11];
 
@@ -4488,7 +4488,7 @@ static void computeTxBodyDigestBase(const int tick)
     ASSERT(nextTickData.epoch == system.epoch); // nextTickData need to be valid
     constexpr size_t outputLen = 4; // output length in bytes
 
-    setMem(g_txBodies, sizeof(Transaction) * NUMBER_OF_TRANSACTIONS_PER_TICK, 0);
+    setMem(g_txBodies, MAX_TRANSACTION_SIZE * NUMBER_OF_TRANSACTIONS_PER_TICK, 0);
     unsigned char* cur_ptr = ((unsigned char*)&g_txBodies);
 
     const unsigned int tickIndex = ts.tickToIndexCurrentEpoch(tick);
