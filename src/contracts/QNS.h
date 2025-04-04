@@ -22,7 +22,12 @@ struct QNSEntry {
   // ipfs hash
   IPFSHash ipfsCID;
   // Expiration date
-  //QPI::uint8 expiration;
+  QPI::uint16 expiration;
+};
+
+
+struct QNSStats{
+    uint64 numberOfEntries;
 };
 
 struct QNS2 {};
@@ -43,6 +48,9 @@ struct QNS : public ContractBase
     {
         uint32 _contractIndex;
         uint32 _type;
+        // 0: register
+        // 1: update
+        // 2: updateExpiration
         QPI::id originator;
         QPI::id id;
         QPI::id owner;
@@ -67,6 +75,7 @@ struct QNS : public ContractBase
 
     struct registerName_locals {
         QNSLogger logger;
+        QPI::uint16 numberOfEpochs;
     };
 
     // Update
@@ -81,6 +90,22 @@ struct QNS : public ContractBase
 
     struct update_locals {
         QNSEntry entry;
+        QPI::uint16 expiration;
+        QNSLogger logger;
+    };
+
+    // UpdateExpiration
+    struct updateExpiration_input {
+      QPI::bit_1024 name;
+        QPI::uint16 expiration;
+    };
+
+    struct updateExpiration_output {
+      sint32 returnCode;
+    };
+
+    struct updateExpiration_locals {
+        QNSEntry entry;
         QNSLogger logger;
     };
 
@@ -93,6 +118,17 @@ struct QNS : public ContractBase
         sint32 returnCode;
         //Array<uint8, 128> returnString;
         QNSEntry returnEntry;
+        // QNSEntry value;
+        // sint32 returnCode;
+    };
+
+    struct getStats_input {
+        // Dummy input struct
+    };
+    struct getStats_output {
+        sint32 returnCode;
+        //Array<uint8, 128> returnString;
+        QNSStats stats;
         // QNSEntry value;
         // sint32 returnCode;
     };
@@ -124,12 +160,23 @@ struct QNS : public ContractBase
         // Check if entries Owner matches the originator
         if(input.entry.owner != qpi.originator())
         {
-            // TODO: Discuss if it shall be allowed that the originator is not the owner while registe a new domain
+            // TODO: Discuss if it shall be allowed that the originator is not the owner while register a new domain
             output.returnCode = -1;
+            //return; // At the moment it is allowed
         }
+
+        // Check if expiration is a valid epoch.
+        if(input.entry.expiration <= qpi.epoch()){
+            output.returnCode = -1;
+            return;
+        }
+
+        locals.numberOfEpochs = input.entry.expiration - qpi.epoch();
+        // calculate fee
 
         // Register the name
         state.lookupMap.set(input.name, input.entry);
+        state.numberOfEntries++;
         output.returnCode = 0;
     _
 
@@ -137,6 +184,7 @@ struct QNS : public ContractBase
     // /***** update *****/
 
     // Update the entry of a registered domain
+    // Expiration is not allowed to update in this procedure
     PUBLIC_PROCEDURE_WITH_LOCALS(update)
         // Check if name is registered
         locals.logger._contractIndex = CONTRACT_INDEX;
@@ -145,6 +193,7 @@ struct QNS : public ContractBase
         locals.logger.id = input.entry.id;
         locals.logger.owner = input.entry.owner;
         LOG_INFO(locals.logger);
+
         if (!state.lookupMap.get(input.name, locals.entry))
         {
             // Entry not found
@@ -158,13 +207,57 @@ struct QNS : public ContractBase
             output.returnCode = -1;
             return;
         }
+        // Save expiration to value in the entry;
+        input.entry.expiration = locals.entry.expiration;
 
         state.lookupMap.set(input.name, input.entry);
+
         output.returnCode = 0;
     _
 
-    /****** lookup *****/
+    // /***** updateExpiration *****/
 
+    // Update the entry of a registered domain
+    // Expiration is not allowed to update in this procedure
+    PUBLIC_PROCEDURE_WITH_LOCALS(updateExpiration)
+        // Check if name is registered
+        locals.logger._contractIndex = CONTRACT_INDEX;
+        locals.logger._type = 2;
+        locals.logger.originator = qpi.originator();
+        locals.logger.id = m256i::zero();
+        locals.logger.owner = m256i::zero();
+        LOG_INFO(locals.logger);
+
+        if (!state.lookupMap.get(input.name, locals.entry))
+        {
+            // Entry not found
+            output.returnCode = -1;
+            return;
+        }
+        // Check if originator is the owner of the domain
+        if(locals.entry.owner != qpi.originator())
+        {
+            // originator is not the owner - no update possible
+            output.returnCode = -1;
+            return;
+        }
+        // Check if expiration is a valid epoch.
+        if(input.expiration <= qpi.epoch()){
+            output.returnCode = -1;
+            return;
+        }
+
+        // Save expiration to value in the entry;
+        locals.entry.expiration = input.expiration;
+
+        state.lookupMap.set(input.name, locals.entry);
+
+        output.returnCode = 0;
+    _
+
+
+
+    /****** lookup *****/
     // Lookup the entry of a domain
     PUBLIC_FUNCTION(lookup)
         //  Check if the name is registered
@@ -181,6 +274,12 @@ struct QNS : public ContractBase
         }
     _
 
+    /****** getStats *****/
+    // get stats aoubt the registry
+    PUBLIC_FUNCTION(getStats)
+        output.stats.numberOfEntries = state.numberOfEntries;
+        output.returnCode = 0;
+    _
 
     INITIALIZE
         state.numberOfEntries = 0;
@@ -190,8 +289,10 @@ struct QNS : public ContractBase
     // Register the user functions and procedures
     REGISTER_USER_FUNCTIONS_AND_PROCEDURES
         REGISTER_USER_FUNCTION(lookup, 1);
+        REGISTER_USER_FUNCTION(getStats, 2);
         REGISTER_USER_PROCEDURE(registerName, 1);
         REGISTER_USER_PROCEDURE(update, 2);
+        REGISTER_USER_PROCEDURE(updateExpiration, 3);
         // REGISTER_USER_PROCEDURE(transferOwnership, 4);
     _
 
