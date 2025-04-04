@@ -184,6 +184,18 @@ struct __FunctionOrProcedureBeginEndGuard
 #define CONTRACT_STATE2_TYPE QBAY2
 #include "contracts/Qbay.h"
 
+#ifndef NO_QNS
+constexpr unsigned short QNS_CONTRACT_INDEX = (CONTRACT_INDEX + 1);
+#undef CONTRACT_INDEX
+#undef CONTRACT_STATE_TYPE
+#undef CONTRACT_STATE2_TYPE
+#define QNS_CONTRACT_INDEX 13
+#define CONTRACT_INDEX QNS_CONTRACT_INDEX
+#define CONTRACT_STATE_TYPE QNS
+#define CONTRACT_STATE2_TYPE QNS2
+#include "contracts/QNS.h"
+#endif
+
 // new contracts should be added above this line
 
 #ifdef INCLUDE_CONTRACT_TEST_EXAMPLES
@@ -211,17 +223,7 @@ constexpr unsigned short TESTEXC_CONTRACT_INDEX = (CONTRACT_INDEX + 1);
 #define CONTRACT_STATE_TYPE TESTEXC
 #define CONTRACT_STATE2_TYPE TESTEXC2
 #include "contracts/TestExampleC.h"
-
-#ifndef NO_QNS
-constexpr unsigned short QNS_CONTRACT_INDEX = (CONTRACT_INDEX + 1);
-#undef CONTRACT_INDEX
-#undef CONTRACT_STATE_TYPE
-#undef CONTRACT_STATE2_TYPE
-#define QNS_CONTRACT_INDEX 12
-#define CONTRACT_INDEX QNS_CONTRACT_INDEX
-#define CONTRACT_STATE_TYPE QNS
-#define CONTRACT_STATE2_TYPE QNS2
-#include "contracts/QNS.h"
+#endif
 
 // #ifdef INCLUDE_CONTRACT_TEST_EXAMPLES
 // constexpr unsigned short TESTEXA_CONTRACT_INDEX = (CONTRACT_INDEX + 1);
