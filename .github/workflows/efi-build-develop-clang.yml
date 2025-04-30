@@ -36,27 +36,52 @@ jobs:
       fail-fast: false # Keep running other matrix jobs even if one fails
       matrix:
         config:
-          # Config 1: Windows MSVC (using MSBuild/.sln)
+          # Config 1: Windows MSVC
           - os: windows-latest
             compiler: msvc
             build_system: msbuild
+            build_variant: 'win_msvc' # Unique descriptor for this job config
 
-          # Config 2: Windows Clang (using CMake)
+          # Config 2: Windows Clang (Tests ON)
           - os: windows-latest
             compiler: clang
             build_system: cmake
-            cmake_generator: "Ninja" # Recommended for CI
+            build_variant: 'win_clang_tests_on' # Descriptor
+            cmake_generator: "Ninja"
             cmake_c_compiler: clang
             cmake_cxx_compiler: clang++
+            build_tests_flag: 'ON' # Flag for this specific build
 
-          # Config 3: Linux Clang (using CMake)
+          # Config 3: Windows Clang (Tests OFF)
+          - os: windows-latest
+            compiler: clang
+            build_system: cmake
+            build_variant: 'win_clang_tests_off' # Descriptor
+            cmake_generator: "Ninja"
+            cmake_c_compiler: clang
+            cmake_cxx_compiler: clang++
+            build_tests_flag: 'OFF' # Flag for this specific build
+
+          # Config 4: Linux Clang (Tests ON)
           - os: ubuntu-latest
             compiler: clang
             build_system: cmake
-            cmake_generator: "Ninja" # Recommended for CI
+            build_variant: 'linux_clang_tests_on' # Descriptor
+            cmake_generator: "Ninja"
             cmake_c_compiler: clang
             cmake_cxx_compiler: clang++
+            build_tests_flag: 'ON' # Flag for this specific build
 
+          # Config 5: Linux Clang (Tests OFF)
+          - os: ubuntu-latest
+            compiler: clang
+            build_system: cmake
+            build_variant: 'linux_clang_tests_off' # Descriptor
+            cmake_generator: "Ninja"
+            cmake_c_compiler: clang
+            cmake_cxx_compiler: clang++
+            build_tests_flag: 'OFF' # Flag for this specific build
+    name: ${{ matrix.config.build_variant }} (${{ matrix.config.os }})
     runs-on: ${{ matrix.config.os }}
 
     steps:
@@ -78,7 +103,7 @@ jobs:
         if: runner.os == 'Linux' # Implies matrix.config.compiler == 'clang'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build
+          sudo apt-get install -y clang cmake ninja-build nasm
 
       - name: Install Clang, CMake, Ninja (Windows Clang Build Only)
         if: runner.os == 'Windows' && matrix.config.compiler == 'clang'
@@ -110,7 +135,7 @@ jobs:
                 -G "${{ matrix.config.cmake_generator }}" \
                 -D CMAKE_C_COMPILER=${{ matrix.config.cmake_c_compiler }} \
                 -D CMAKE_CXX_COMPILER=${{ matrix.config.cmake_cxx_compiler }} \
-                -D BUILD_TESTS:BOOL=ON \
+                -D BUILD_TESTS:BOOL=${{ matrix.config.build_tests_flag }} \
                 -D CMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_CONFIGURATION }} \
                 -D ENABLE_AVX512=ON \
 
@@ -119,7 +144,7 @@ jobs:
                 -G "${{ matrix.config.cmake_generator }}" \
                 -D CMAKE_C_COMPILER=${{ matrix.config.cmake_c_compiler }} \
                 -D CMAKE_CXX_COMPILER=${{ matrix.config.cmake_cxx_compiler }} \
-                -D BUILD_TESTS:BOOL=OFF \
+                -D BUILD_TESTS:BOOL=${{ matrix.config.build_tests_flag }} \
                 -D CMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_CONFIGURATION }} \
                 -D ENABLE_AVX512=ON \
 
