@@ -99,9 +99,13 @@ jobs:
       # --- === Setup Phase === ---
       - name: Add MSBuild to PATH (Windows MSVC Env Setup)
         if: runner.os == 'Windows' && (matrix.config.build_system == 'msbuild' || (matrix.config.build_system == 'cmake' && matrix.config.compiler == 'msvc'))
-        uses: microsoft/setup-msbuild@v1.3.1 # Consider trying @v2 if problems persist
+        uses: microsoft/setup-msbuild@v1.3.1
         with:
           vs-version: 'latest'
+          
+      - name: Setup Visual C++ Environment (Windows MSVC)
+        if: runner.os == 'Windows' && matrix.config.compiler == 'msvc'
+        uses: ilammy/msvc-dev-cmd@v1
 
       - name: Setup NuGet (Windows MSBuild System Only)
         if: matrix.config.build_system == 'msbuild'
@@ -139,29 +143,25 @@ jobs:
 
       # == CMake Path ==
 
-      # ADD Debugging Step just before MSVC Configure
+      # Improved debugging step that won't get stuck
       - name: Debug Environment Check (Windows MSVC)
         if: matrix.config.build_system == 'cmake' && runner.os == 'Windows' && matrix.config.compiler == 'msvc'
-        shell: pwsh
+        shell: cmd
         run: |
-          echo "--- Checking PATH ---"
-          echo $env:PATH
-          echo "--- Checking for cl.exe ---"
-          Get-Command cl.exe -ErrorAction SilentlyContinue
-          if ($?) {
-            echo "cl.exe FOUND by Get-Command. Version info:"
-            cl /? | Out-String | Select-Object -First 5 # Display first few lines of cl help/version
-          } else {
-            echo "cl.exe NOT FOUND by Get-Command."
-            # Try where.exe as backup check
-            where.exe cl.exe /R "C:\Program Files" -ErrorAction SilentlyContinue
-            if ($?) {
-               echo "cl.exe maybe found by where.exe"
-            } else {
-               echo "cl.exe definitely not found by where.exe either."
-            }
-          }
-          echo "--- End Debug ---"
+          echo --- Checking PATH ---
+          echo %PATH%
+          echo --- Checking for cl.exe ---
+          where cl.exe
+          if %ERRORLEVEL% EQU 0 (
+            echo cl.exe FOUND. Version info:
+            cl.exe 2>&1 | findstr /B /C:"Microsoft"
+          ) else (
+            echo cl.exe NOT FOUND in PATH
+          )
+          echo --- Visual Studio Environment Variables ---
+          echo VSINSTALLDIR: %VSINSTALLDIR%
+          echo VCToolsInstallDir: %VCToolsInstallDir%
+          echo --- End Debug ---
 
       # Configure CMake (Windows MSVC -> Use pwsh, NO explicit compiler flags)
       - name: Configure CMake (Windows MSVC)
