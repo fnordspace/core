@@ -143,25 +143,7 @@ jobs:
 
       # == CMake Path ==
 
-      # Improved debugging step that won't get stuck
-      - name: Debug Environment Check (Windows MSVC)
-        if: matrix.config.build_system == 'cmake' && runner.os == 'Windows' && matrix.config.compiler == 'msvc'
-        shell: cmd
-        run: |
-          echo --- Checking PATH ---
-          echo %PATH%
-          echo --- Checking for cl.exe ---
-          where cl.exe
-          if %ERRORLEVEL% EQU 0 (
-            echo cl.exe FOUND. Version info:
-            cl.exe 2>&1 | findstr /B /C:"Microsoft"
-          ) else (
-            echo cl.exe NOT FOUND in PATH
-          )
-          echo --- Visual Studio Environment Variables ---
-          echo VSINSTALLDIR: %VSINSTALLDIR%
-          echo VCToolsInstallDir: %VCToolsInstallDir%
-          echo --- End Debug ---
+      # Debug step removed
 
       # Configure CMake (Windows MSVC -> Use pwsh, NO explicit compiler flags)
       - name: Configure CMake (Windows MSVC)
