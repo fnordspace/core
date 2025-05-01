@@ -5,6 +5,36 @@ on:
   push:
     branches:
       - ci-runner
+  workflow_dispatch:
+    inputs:
+      skip_win_msvc_msbuild:
+        description: 'Skip Windows MSVC MSBuild configuration'
+        type: boolean
+        default: false
+      skip_win_clang_cmake_tests_on:
+        description: 'Skip Windows Clang CMake (Tests ON) configuration'
+        type: boolean
+        default: true
+      skip_win_clang_cmake_tests_off:
+        description: 'Skip Windows Clang CMake (Tests OFF) configuration'
+        type: boolean
+        default: true
+      skip_linux_clang_cmake_tests_on:
+        description: 'Skip Linux Clang CMake (Tests ON) configuration'
+        type: boolean
+        default: false
+      skip_linux_clang_cmake_tests_off:
+        description: 'Skip Linux Clang CMake (Tests OFF) configuration'
+        type: boolean
+        default: true
+      skip_win_msvc_cmake_tests_on:
+        description: 'Skip Windows MSVC CMake (Tests ON) configuration'
+        type: boolean
+        default: false
+      skip_win_msvc_cmake_tests_off:
+        description: 'Skip Windows MSVC CMake (Tests OFF) configuration'
+        type: boolean
+        default: true
 
 env:
   # --- MSBuild specific ---
@@ -91,6 +121,7 @@ jobs:
 
     name: ${{ matrix.config.build_variant }} (${{ matrix.config.os }})
     runs-on: ${{ matrix.config.os }}
+    # All jobs will run, but build steps may be skipped based on input parameters
 
     steps:
       - name: Checkout code
@@ -133,21 +164,36 @@ jobs:
 
       # == MSBuild Path (Windows/MSVC) ==
       - name: Restore NuGet packages (MSVC Build)
-        if: matrix.config.build_system == 'msbuild'
+        if: matrix.config.build_system == 'msbuild' && !(matrix.config.build_variant == 'win_msvc_msbuild' && github.event.inputs.skip_win_msvc_msbuild == 'true')
         working-directory: ${{ github.workspace }}
         run: nuget restore ${{ env.SOLUTION_FILE_PATH }}
 
       - name: Build Solution with MSBuild (MSVC Build)
-        if: matrix.config.build_system == 'msbuild'
+        if: matrix.config.build_system == 'msbuild' && !(matrix.config.build_variant == 'win_msvc_msbuild' && github.event.inputs.skip_win_msvc_msbuild == 'true')
         run: msbuild /m /p:Configuration=${{ env.MSBUILD_BUILD_CONFIGURATION }} ${{ env.SOLUTION_FILE_PATH }}
 
       # == CMake Path ==
 
       # Debug step removed
+      
+      # Add a step to indicate the build is being skipped but still marked as successful
+      - name: Skip notification
+        if: >-
+          (matrix.config.build_variant == 'win_msvc_msbuild' && github.event.inputs.skip_win_msvc_msbuild == 'true') ||
+          (matrix.config.build_variant == 'win_clang_cmake_tests_on' && github.event.inputs.skip_win_clang_cmake_tests_on == 'true') ||
+          (matrix.config.build_variant == 'win_clang_cmake_tests_off' && github.event.inputs.skip_win_clang_cmake_tests_off == 'true') ||
+          (matrix.config.build_variant == 'linux_clang_cmake_tests_on' && github.event.inputs.skip_linux_clang_cmake_tests_on == 'true') ||
+          (matrix.config.build_variant == 'linux_clang_cmake_tests_off' && github.event.inputs.skip_linux_clang_cmake_tests_off == 'true') ||
+          (matrix.config.build_variant == 'win_msvc_cmake_tests_on' && github.event.inputs.skip_win_msvc_cmake_tests_on == 'true') ||
+          (matrix.config.build_variant == 'win_msvc_cmake_tests_off' && github.event.inputs.skip_win_msvc_cmake_tests_off == 'true')
+        run: echo "This build was skipped by user configuration but marked as successful"
 
       # Configure CMake (Windows MSVC -> Use pwsh, NO explicit compiler flags)
       - name: Configure CMake (Windows MSVC)
-        if: matrix.config.build_system == 'cmake' && runner.os == 'Windows' && matrix.config.compiler == 'msvc'
+        if: >-
+          matrix.config.build_system == 'cmake' && runner.os == 'Windows' && matrix.config.compiler == 'msvc' &&
+          !((matrix.config.build_variant == 'win_msvc_cmake_tests_on' && github.event.inputs.skip_win_msvc_cmake_tests_on == 'true') ||
+            (matrix.config.build_variant == 'win_msvc_cmake_tests_off' && github.event.inputs.skip_win_msvc_cmake_tests_off == 'true'))
         shell: pwsh # Use PowerShell for Windows MSVC builds
         run: |
           echo "--- Configuring CMake for BUILD_TESTS=ON in ${{ env.CMAKE_BUILD_DIR_TESTS_ON }} (pwsh, auto-detect compiler) ---"
@@ -158,7 +204,12 @@ jobs:
 
       # Configure CMake (Other OS/Compiler -> Use bash, requires explicit compiler flags)
       - name: Configure CMake (Other OS/Compiler)
-        if: matrix.config.build_system == 'cmake' && !(runner.os == 'Windows' && matrix.config.compiler == 'msvc')
+        if: >-
+          matrix.config.build_system == 'cmake' && !(runner.os == 'Windows' && matrix.config.compiler == 'msvc') &&
+          !((matrix.config.build_variant == 'win_clang_cmake_tests_on' && github.event.inputs.skip_win_clang_cmake_tests_on == 'true') ||
+            (matrix.config.build_variant == 'win_clang_cmake_tests_off' && github.event.inputs.skip_win_clang_cmake_tests_off == 'true') ||
+            (matrix.config.build_variant == 'linux_clang_cmake_tests_on' && github.event.inputs.skip_linux_clang_cmake_tests_on == 'true') ||
+            (matrix.config.build_variant == 'linux_clang_cmake_tests_off' && github.event.inputs.skip_linux_clang_cmake_tests_off == 'true'))
         shell: bash # Use Bash for Linux or Windows Clang builds
         run: |
           echo "--- Configuring CMake for BUILD_TESTS=ON in ${{ env.CMAKE_BUILD_DIR_TESTS_ON }} (bash) ---"
@@ -169,7 +220,10 @@ jobs:
 
       # Build with CMake (Windows MSVC -> Use pwsh)
       - name: Build with CMake (Windows MSVC)
-        if: matrix.config.build_system == 'cmake' && runner.os == 'Windows' && matrix.config.compiler == 'msvc'
+        if: >-
+          matrix.config.build_system == 'cmake' && runner.os == 'Windows' && matrix.config.compiler == 'msvc' &&
+          !((matrix.config.build_variant == 'win_msvc_cmake_tests_on' && github.event.inputs.skip_win_msvc_cmake_tests_on == 'true') ||
+            (matrix.config.build_variant == 'win_msvc_cmake_tests_off' && github.event.inputs.skip_win_msvc_cmake_tests_off == 'true'))
         shell: pwsh
         run: |
           echo "--- Building CMake for BUILD_TESTS=ON from ${{ env.CMAKE_BUILD_DIR_TESTS_ON }} (pwsh) ---"
@@ -180,7 +234,12 @@ jobs:
 
       # Build with CMake (Other OS/Compiler -> Use bash)
       - name: Build with CMake (Other OS/Compiler)
-        if: matrix.config.build_system == 'cmake' && !(runner.os == 'Windows' && matrix.config.compiler == 'msvc')
+        if: >-
+          matrix.config.build_system == 'cmake' && !(runner.os == 'Windows' && matrix.config.compiler == 'msvc') &&
+          !((matrix.config.build_variant == 'win_clang_cmake_tests_on' && github.event.inputs.skip_win_clang_cmake_tests_on == 'true') ||
+            (matrix.config.build_variant == 'win_clang_cmake_tests_off' && github.event.inputs.skip_win_clang_cmake_tests_off == 'true') ||
+            (matrix.config.build_variant == 'linux_clang_cmake_tests_on' && github.event.inputs.skip_linux_clang_cmake_tests_on == 'true') ||
+            (matrix.config.build_variant == 'linux_clang_cmake_tests_off' && github.event.inputs.skip_linux_clang_cmake_tests_off == 'true'))
         shell: bash
         run: |
           echo "--- Building CMake for BUILD_TESTS=ON from ${{ env.CMAKE_BUILD_DIR_TESTS_ON }} (bash) ---"
