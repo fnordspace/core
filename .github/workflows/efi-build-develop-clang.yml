@@ -61,6 +61,7 @@ jobs:
             cmake_c_compiler: clang
             cmake_cxx_compiler: clang++
             build_tests_flag: 'ON'
+            build_efi_flag: 'OFF'
 
           # Config 5: Linux Clang CMake (Tests OFF)
           # - os: ubuntu-latest
@@ -80,6 +81,7 @@ jobs:
             cmake_generator: "Ninja"
             # No explicit C/CXX compiler needed - rely on setup-msbuild env
             build_tests_flag: 'ON'
+            build_efi_flag: 'OFF'
 
           # Config 7: Windows MSVC CMake (Tests OFF) - Auto-detect compiler
           # - os: windows-latest
@@ -151,10 +153,10 @@ jobs:
         shell: pwsh # Use PowerShell for Windows MSVC builds
         run: |
           echo "--- Configuring CMake for BUILD_TESTS=ON in ${{ env.CMAKE_BUILD_DIR_TESTS_ON }} (pwsh, auto-detect compiler) ---"
-          cmake -S . -B ${{ env.CMAKE_BUILD_DIR_TESTS_ON }} -G "${{ matrix.config.cmake_generator }}" -D BUILD_TESTS:BOOL=${{ matrix.config.build_tests_flag }} -D CMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_CONFIGURATION }} -D ENABLE_AVX512=ON
+          cmake -S . -B ${{ env.CMAKE_BUILD_DIR_TESTS_ON }} -G "${{ matrix.config.cmake_generator }}" -D BUILD_TESTS:BOOL=${{ matrix.config.build_tests_flag }} -D BUILD_EFI:BOOL=${{ matrix.config.build_efi_flag }} -D CMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_CONFIGURATION }} -D ENABLE_AVX512=ON
 
           echo "--- Configuring CMake for BUILD_TESTS=OFF in ${{ env.CMAKE_BUILD_DIR_TESTS_OFF }} (pwsh, auto-detect compiler) ---"
-          cmake -S . -B ${{ env.CMAKE_BUILD_DIR_TESTS_OFF }} -G "${{ matrix.config.cmake_generator }}" -D BUILD_TESTS:BOOL=${{ matrix.config.build_tests_flag }} -D CMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_CONFIGURATION }} -D ENABLE_AVX512=ON
+          cmake -S . -B ${{ env.CMAKE_BUILD_DIR_TESTS_OFF }} -G "${{ matrix.config.cmake_generator }}" -D BUILD_TESTS:BOOL=${{ matrix.config.build_tests_flag }} -D BUILD_EFI:BOOL=${{ matrix.config.build_efi_flag }} -D CMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_CONFIGURATION }} -D ENABLE_AVX512=ON
 
       # Configure CMake (Other OS/Compiler -> Use bash, requires explicit compiler flags)
       - name: Configure CMake (Other OS/Compiler)
@@ -162,10 +164,10 @@ jobs:
         shell: bash # Use Bash for Linux or Windows Clang builds
         run: |
           echo "--- Configuring CMake for BUILD_TESTS=ON in ${{ env.CMAKE_BUILD_DIR_TESTS_ON }} (bash) ---"
-          cmake -S . -B ${{ env.CMAKE_BUILD_DIR_TESTS_ON }} -G "${{ matrix.config.cmake_generator }}" -D CMAKE_C_COMPILER=${{ matrix.config.cmake_c_compiler }} -D CMAKE_CXX_COMPILER=${{ matrix.config.cmake_cxx_compiler }} -D BUILD_TESTS:BOOL=${{ matrix.config.build_tests_flag }} -D CMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_CONFIGURATION }} -D ENABLE_AVX512=ON
+          cmake -S . -B ${{ env.CMAKE_BUILD_DIR_TESTS_ON }} -G "${{ matrix.config.cmake_generator }}" -D CMAKE_C_COMPILER=${{ matrix.config.cmake_c_compiler }} -D CMAKE_CXX_COMPILER=${{ matrix.config.cmake_cxx_compiler }} -D BUILD_EFI:BOOL=${{ matrix.config.build_efi_flag }} -D BUILD_TESTS:BOOL=${{ matrix.config.build_tests_flag }} -D CMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_CONFIGURATION }} -D ENABLE_AVX512=ON
 
           echo "--- Configuring CMake for BUILD_TESTS=OFF in ${{ env.CMAKE_BUILD_DIR_TESTS_OFF }} (bash) ---"
-          cmake -S . -B ${{ env.CMAKE_BUILD_DIR_TESTS_OFF }} -G "${{ matrix.config.cmake_generator }}" -D CMAKE_C_COMPILER=${{ matrix.config.cmake_c_compiler }} -D CMAKE_CXX_COMPILER=${{ matrix.config.cmake_cxx_compiler }} -D BUILD_TESTS:BOOL=${{ matrix.config.build_tests_flag }} -D CMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_CONFIGURATION }} -D ENABLE_AVX512=ON
+          cmake -S . -B ${{ env.CMAKE_BUILD_DIR_TESTS_OFF }} -G "${{ matrix.config.cmake_generator }}" -D CMAKE_C_COMPILER=${{ matrix.config.cmake_c_compiler }} -D CMAKE_CXX_COMPILER=${{ matrix.config.cmake_cxx_compiler }} -D BUILD_EFI:BOOL=${{ matrix.config.build_efi_flag }} -D BUILD_TESTS:BOOL=${{ matrix.config.build_tests_flag }} -D CMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_CONFIGURATION }} -D ENABLE_AVX512=ON
 
       # Build with CMake (Windows MSVC -> Use pwsh)
       - name: Build with CMake (Windows MSVC)
