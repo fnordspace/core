@@ -44,7 +44,7 @@ add_executable(
   # score_cache.cpp
   # score.cpp
   # spectrum.cpp
-  # stdlib_impl.cpp
+  stdlib_impl.cpp
   # tick_storage.cpp
   # tx_status_request.cpp
   # vote_counter.cpp
