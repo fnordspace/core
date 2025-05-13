@@ -42,9 +42,21 @@ static void initTime()
     updateTime();
 }
 
-inline int dayIndex(unsigned int year, unsigned int month, unsigned int day) // 0 = Wednesday
+// Calculates an index representing the day of the week for a given date with 0 = Wednesday
+inline int dayIndex(unsigned int year, unsigned int month, unsigned int day) 
 {
-    return (year += (2000 - (month = (month + 9) % 12) / 10)) * 365 + year / 4 - year / 100 + year / 400 + (month * 306 + 5) / 10 + day - 1;
+    month = (month + 9) % 12;
+
+    year += (2000 - month / 10);
+
+    int result = year * 365;
+    result += year / 4;
+    result -= year / 100;
+    result += year / 400;
+    result += (month * 306 + 5) / 10;
+    result += day - 1;
+
+    return result;
 }
 
 inline long long ms(unsigned char year, unsigned char month, unsigned char day, unsigned char hour, unsigned char minute, unsigned char second, unsigned short millisecond)
