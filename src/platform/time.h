@@ -31,6 +31,7 @@ static void updateTime()
 
 #endif
 
+[[maybe_unused]]
 static void initTime()
 {
     setMem(&utcTime, sizeof(utcTime), 0);
@@ -68,7 +69,7 @@ inline long long ms(unsigned char year, unsigned char month, unsigned char day, 
 inline unsigned long long now_ms()
 {
     // utcTime is updated on main thread - because only main thread can do it
-    return ms(unsigned char(utcTime.Year % 100), utcTime.Month, utcTime.Day, utcTime.Hour, utcTime.Minute, utcTime.Second, utcTime.Nanosecond / 1000000);
+    return ms(static_cast<unsigned char>(utcTime.Year % 100), utcTime.Month, utcTime.Day, utcTime.Hour, utcTime.Minute, utcTime.Second, utcTime.Nanosecond / 1000000);
 }
 #else
 unsigned long long now_ms();
