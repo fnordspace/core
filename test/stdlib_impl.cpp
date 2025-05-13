@@ -9,6 +9,7 @@
 
 #include "platform/time.h"
 
+EFI_TIME utcTime;
 
 void setMem(void* buffer, unsigned long long size, unsigned char value)
 {
