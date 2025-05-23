@@ -48,3 +48,6 @@ if(BUILD_EFI)
     message(STATUS "Building EFI application")
     add_subdirectory(src)
 endif()
+
+# Add the UEFI m256i benchmark
+add_subdirectory(benchmark_uefi)
