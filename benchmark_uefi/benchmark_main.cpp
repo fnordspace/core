@@ -1,16 +1,18 @@
-#include "src/platform/m256.h"
-#include "src/platform/time_stamp_counter.h"
-#include "lib/platform_efi/uefi.h"
-#include "lib/platform_common/compiler_warnings.h"
+#include <src/platform/m256.h>
+#include <lib/platform_efi/uefi.h>
+#include <lib/platform_common/compiler_warnings.h>
+
+#define EFI_TEXT(s) (CHAR16*)(L##s)
 
 // Global SystemTable pointer
 EFI_SYSTEM_TABLE *gSystemTable = nullptr;
+static unsigned long long g_tsc_frequency = 0;
 
 // Helper function to convert unsigned long long to CHAR16 hex string
 void ull_to_hex_str(unsigned long long n, CHAR16* out_str) {
     if (out_str == nullptr) return;
 
-    const CHAR16 hex_chars[] = L"0123456789ABCDEF";
+    const CHAR16* hex_chars = EFI_TEXT("0123456789ABCDEF");
     // Max 16 hex digits for 64-bit number + null terminator
     CHAR16 buffer[17]; 
     int i = 15;
@@ -48,9 +50,10 @@ void ull_to_hex_str(unsigned long long n, CHAR16* out_str) {
         // This indicates an issue with the loop or buffer indexing,
         // for safety, put "Error" or a known pattern.
         // For now, let's assume the logic above handles it, but this is a safeguard.
-        const CHAR16 err_str[] = L"CONV_ERR";
-        for(int l=0; err_str[l] != L'\0'; ++l) out_str[l] = err_str[l];
-        out_str[sizeof(err_str)/sizeof(CHAR16) -1] = L'\0';
+        const CHAR16* err_str = EFI_TEXT("CONV_ERR");
+        int l = 0;
+        for(; err_str[l] != L'\0'; ++l) out_str[l] = err_str[l];
+        out_str[l] = L'\0';
     }
 }
 
@@ -58,10 +61,13 @@ void ull_to_hex_str(unsigned long long n, CHAR16* out_str) {
 void print_line(const CHAR16* str) {
     if (gSystemTable && gSystemTable->ConOut) {
         gSystemTable->ConOut->OutputString(gSystemTable->ConOut, (CHAR16*)str);
-        gSystemTable->ConOut->OutputString(gSystemTable->ConOut, L"\r\n");
+        gSystemTable->ConOut->OutputString(gSystemTable->ConOut, EFI_TEXT("\r\n"));
     }
 }
 
+void print_line(const wchar_t* str) {
+    print_line((CHAR16*)(str));
+}
 // Helper to print a string followed by a hex value and newline
 void print_value_hex(const CHAR16* prefix, unsigned long long value) {
     if (gSystemTable && gSystemTable->ConOut) {
@@ -89,6 +95,32 @@ void print_value_hex(const CHAR16* prefix, unsigned long long value) {
     }
 }
 
+void print_value_hex(const wchar_t* prefix, unsigned long long value) {
+    print_value_hex((CHAR16*)(prefix), value);\
+}
+
+static void calibrate_tsc_frequency_minimal() {
+    if (!gSystemTable || !gSystemTable->BootServices) {
+        print_line(EFI_TEXT("Cannot calibrate TSC: SystemTable or BootServices not available."));
+        g_tsc_frequency = 0; // Ensure frequency is 0 if calibration fails
+        return;
+    }
+
+    print_line(EFI_TEXT("Performing minimal TSC calibration..."));
+    unsigned long long start_ticks = __rdtsc();
+    gSystemTable->BootServices->Stall(100000); // Stall for 100ms (100,000 microseconds)
+    unsigned long long end_ticks = __rdtsc();
+    unsigned long long ticks_difference = end_ticks - start_ticks;
+    
+    if (ticks_difference == 0) { // Avoid division by zero if stall is too short or TSC is not advancing
+         print_line(EFI_TEXT("TSC calibration failed: No tick difference."));
+         g_tsc_frequency = 0;
+    } else {
+        g_tsc_frequency = ticks_difference * 10; // Multiply by 10 because stall was for 1/10th of a second
+        print_value_hex(EFI_TEXT("Approx. TSC Freq (Hz):"), g_tsc_frequency);
+    }
+    print_line(EFI_TEXT("Minimal TSC calibration done."));
+}
 
 EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     // Suppress unused parameter warnings
@@ -108,12 +140,11 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     print_line(L"=================================");
 
     // Initialize time-stamp counter
-    initTimeStampCounter();
-    print_line(L"Time-stamp counter initialized.");
+    // initTimeStampCounter();
+    // print_line(L"Time-stamp counter initialized.");
 
-    CHAR16 message[256];
     const unsigned long long iterations = 100000; // 100k iterations
-
+    calibrate_tsc_frequency_minimal();
     print_line(L"Starting m256i benchmark...");
     print_value_hex(L"Iterations:", iterations);
 
@@ -171,9 +202,9 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     print_line(L"Benchmark complete. System will halt in a moment or press ESC to exit.");
 
     // Wait for a key press (optional, good for seeing output)
-    // EFI_INPUT_KEY Key;
-    // SystemTable->ConIn->Reset(SystemTable->ConIn, FALSE);
-    // while (SystemTable->ConIn->ReadKeyStroke(SystemTable->ConIn, &Key) == EFI_NOT_READY);
+    EFI_INPUT_KEY Key;
+    SystemTable->ConIn->Reset(SystemTable->ConIn, FALSE);
+    while (SystemTable->ConIn->ReadKeyStroke(SystemTable->ConIn, &Key) == EFI_NOT_READY);
 
     return EFI_SUCCESS;
 }
