@@ -161,6 +161,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     // --- Actual Benchmark Loop ---
     start_tsc = __rdtsc();
 
+    uint32_t accumulator = 0;
     for (unsigned long long i = 0; i < iterations; ++i) {
         // Construction (already done for 'a', re-init for timing consistency if desired, or time a block)
         // For this loop, we focus on operations with existing objects.
@@ -174,6 +175,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
             // This should ideally not happen if assignment works.
             // Could print an error or increment a counter if it does.
         }
+        accumulator += b.m256i_i32[0]; 
         a.setRandomValue();                         // setRandomValue
         c = m256i::zero();                          // zero
     }
@@ -184,6 +186,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     // --- Results ---
     print_line(L"Benchmark finished.");
     print_value_hex(L"Total cycles:", total_cycles);
+    print_value_hex(L"Dummy print to avoid optimization:", accumulator);
 
     if (iterations > 0) {
         unsigned long long avg_cycles_per_iteration = total_cycles / iterations;
