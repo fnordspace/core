@@ -1,6 +1,8 @@
-#include <src/platform/m256.h>
+#include <lib/platform_common/qintrin.h>
 #include <lib/platform_efi/uefi.h>
 #include <lib/platform_common/compiler_warnings.h>
+#include <lib/platform_common/processor.h>
+#include <src/platform/m256.h>
 
 #define EFI_TEXT(s) (CHAR16*)(L##s)
 
@@ -122,6 +124,155 @@ static void calibrate_tsc_frequency_minimal() {
     print_line(EFI_TEXT("Minimal TSC calibration done."));
 }
 
+static void run_assignment_benchmark(uint32_t iterations) {
+    print_line(L"--- Starting Assignment Benchmark ---");
+
+    m256i source(0,0,0,0);
+    m256i dest;
+    uint64_t accumulator = 0; // Not volatile, rely on printing.
+
+    if (iterations == 0) {
+        print_line(L"No iterations performed.");
+        print_line(L"--- Assignment Benchmark Complete ---");
+        print_line(L"");
+        return;
+    }
+
+    unsigned long long start_tsc = __rdtsc();
+    for (uint32_t i = 0; i < iterations; ++i) {
+        source.u32._0 = (uint32_t)i; // Vary the source
+        dest = source;
+        accumulator += dest.u32._0; // Use the result
+    }
+    unsigned long long end_tsc = __rdtsc();
+
+    unsigned long long total_cycles = end_tsc - start_tsc;
+    unsigned long long avg_cycles_per_iteration = total_cycles / iterations;
+
+    print_value_hex(L"Total cycles (Assignment):", total_cycles);
+    print_value_hex(L"Avg cycles per iteration (Assignment):", avg_cycles_per_iteration);
+    print_value_hex(L"Accumulator (Assignment):", accumulator);
+
+    print_line(L"--- Assignment Benchmark Complete ---");
+    print_line(L""); // Blank line for spacing
+}
+
+static void run_comparison_benchmark(uint32_t iterations) {
+    print_line(L"--- Starting Comparison Benchmark ---");
+
+    m256i val1;
+    m256i val2;
+    // Define fixed_different_val using CHAR16 for string literals if it were for print_line,
+    // but it's for m256i constructor which takes ULLs.
+    const m256i fixed_different_val(0xAAAAAAAAAAAAAAAAULL, 0xBBBBBBBBBBBBBBBBULL, 0xCCCCCCCCCCCCCCCCULL, 0xDDDDDDDDDDDDDDDDULL); // A distinct pattern
+    uint64_t accumulator = 0; // Counts true comparisons
+
+    if (iterations == 0) {
+        print_line(L"No iterations performed.");
+        print_line(L"--- Comparison Benchmark Complete ---");
+        print_line(L"");
+        return;
+    }
+
+    unsigned long long start_tsc = __rdtsc();
+    for (uint32_t i = 0; i < iterations; ++i) {
+        // Vary val1 based on i - let's make all its parts depend on i
+        val1 = m256i(i, i + 1, i + 2, i + 3); // Constructor takes ULLs
+
+        if ((i % 4) == 0) {
+            val2 = val1; // Comparison will be true
+        } else {
+            val2 = fixed_different_val; // Comparison will be false typically
+        }
+        
+        bool comparison_result = (val1 == val2);
+        accumulator += comparison_result; 
+    }
+    unsigned long long end_tsc = __rdtsc();
+
+    unsigned long long total_cycles = end_tsc - start_tsc;
+    unsigned long long avg_cycles_per_iteration = total_cycles / iterations;
+
+    print_value_hex(L"Total cycles (Comparison):", total_cycles);
+    print_value_hex(L"Avg cycles per iteration (Comparison):", avg_cycles_per_iteration);
+    print_value_hex(L"Accumulator (True count):", accumulator);
+
+    print_line(L"--- Comparison Benchmark Complete ---");
+    print_line(L""); // Blank line for spacing
+}
+
+static void run_setrandom_benchmark(uint32_t iterations) {
+    print_line(L"--- Starting SetRandom Benchmark ---");
+
+    m256i val(0,0,0,0);
+    uint64_t accumulator = 0;
+
+    if (iterations == 0) {
+        print_line(L"No iterations performed.");
+        print_line(L"--- SetRandom Benchmark Complete ---");
+        print_line(L"");
+        return;
+    }
+
+    unsigned long long start_tsc = __rdtsc();
+    for (uint32_t i = 0; i < iterations; ++i) {
+        val.setRandomValue();
+        accumulator += val.u32._0; // Use one part of the random value
+    }
+    unsigned long long end_tsc = __rdtsc();
+
+    unsigned long long total_cycles = end_tsc - start_tsc;
+    unsigned long long avg_cycles_per_iteration = total_cycles / iterations;
+
+    print_value_hex(L"Total cycles (SetRandom):", total_cycles);
+    print_value_hex(L"Avg cycles per iteration (SetRandom):", avg_cycles_per_iteration);
+    print_value_hex(L"Accumulator (SetRandom):", accumulator); // Value will be somewhat random
+
+    print_line(L"--- SetRandom Benchmark Complete ---");
+    print_line(L""); // Blank line for spacing
+}
+
+static void run_zero_benchmark(uint32_t iterations) {
+    print_line(L"--- Starting Zero Benchmark ---");
+
+    m256i val(1,2,3,4); // Initialize to non-zero to ensure assignment happens
+    uint64_t accumulator = 0;
+
+    if (iterations == 0) {
+        print_line(L"No iterations performed.");
+        print_line(L"--- Zero Benchmark Complete ---");
+        print_line(L"");
+        return;
+    }
+
+    unsigned long long start_tsc = __rdtsc();
+    for (uint32_t i = 0; i < iterations; ++i) {
+        val = m256i::zero();
+        accumulator += val.u32._0; // Use one part of the zeroed value
+    }
+    unsigned long long end_tsc = __rdtsc();
+
+    unsigned long long total_cycles = end_tsc - start_tsc;
+    unsigned long long avg_cycles_per_iteration = total_cycles / iterations;
+
+    print_value_hex(L"Total cycles (Zero):", total_cycles);
+    print_value_hex(L"Avg cycles per iteration (Zero):", avg_cycles_per_iteration);
+    print_value_hex(L"Accumulator (Zero):", accumulator); // Will be 0
+
+    print_line(L"--- Zero Benchmark Complete ---");
+    print_line(L""); // Blank line for spacing
+}
+
+// static void enableAVX()
+// {
+//     __writecr4(__readcr4() | 0x40000);
+//     _xsetbv(_XCR_XFEATURE_ENABLED_MASK, _xgetbv(_XCR_XFEATURE_ENABLED_MASK) | (7
+// #ifdef __AVX512F__
+//             | 224
+// #endif
+//             ));
+// }
+
 EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     // Suppress unused parameter warnings
     (void)ImageHandle;
@@ -136,6 +287,8 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
 
     // Clear the screen
     gSystemTable->ConOut->ClearScreen(gSystemTable->ConOut);
+
+//    enableAVX();
     print_line(L"UEFI m256i Benchmark Application");
     print_line(L"=================================");
 
@@ -146,54 +299,14 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     const unsigned long long iterations = 100000; // 100k iterations
     calibrate_tsc_frequency_minimal();
     print_line(L"Starting m256i benchmark...");
-    print_value_hex(L"Iterations:", iterations);
 
+    print_value_hex(L"Iterations per benchmark:", iterations); // Changed "Iterations:" to "Iterations per benchmark:"
+    print_line(L""); // Add a blank line for spacing
 
-    // --- Benchmark Variables ---
-    m256i a(1, 2, 3, 4);
-    m256i b = a;
-    m256i c;
-    bool equal_res = false;
-    
-    unsigned long long start_tsc, end_tsc;
-    unsigned long long total_cycles = 0;
-
-    // --- Actual Benchmark Loop ---
-    start_tsc = __rdtsc();
-
-    uint32_t accumulator = 0;
-    for (unsigned long long i = 0; i < iterations; ++i) {
-        // Construction (already done for 'a', re-init for timing consistency if desired, or time a block)
-        // For this loop, we focus on operations with existing objects.
-        m256i temp_a( (uint32_t)i, (uint32_t)(i+1), (uint32_t)(i+2), (uint32_t)(i+3) ); // Construction
-        b = temp_a;                                 // Assignment
-        equal_res = (temp_a == b);                  // Comparison
-        // The boolean result isn't directly used here to prevent optimizing out,
-        // but in a real scenario, you might sum results or similar.
-        // For now, we rely on the operations themselves not being optimized away.
-        if (!equal_res) { 
-            // This should ideally not happen if assignment works.
-            // Could print an error or increment a counter if it does.
-        }
-        accumulator += b.m256i_i32[0]; 
-        a.setRandomValue();                         // setRandomValue
-        c = m256i::zero();                          // zero
-    }
-
-    end_tsc = __rdtsc();
-    total_cycles = end_tsc - start_tsc;
-
-    // --- Results ---
-    print_line(L"Benchmark finished.");
-    print_value_hex(L"Total cycles:", total_cycles);
-    print_value_hex(L"Dummy print to avoid optimization:", accumulator);
-
-    if (iterations > 0) {
-        unsigned long long avg_cycles_per_iteration = total_cycles / iterations;
-        print_value_hex(L"Average cycles per iteration:", avg_cycles_per_iteration);
-    } else {
-        print_line(L"No iterations performed.");
-    }
+    run_assignment_benchmark(iterations);
+    run_comparison_benchmark(iterations);
+    run_setrandom_benchmark(iterations);
+    run_zero_benchmark(iterations);
     
     // Example of printing one of the m256i values (first u32 element)
     // This would require m256i to have a getter or a way to access its elements.
