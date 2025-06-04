@@ -1,7 +1,6 @@
 #include <lib/platform_common/qintrin.h>
 #include <lib/platform_efi/uefi.h>
-#include <lib/platform_common/compiler_warnings.h>
-#include <lib/platform_common/processor.h>
+#include <lib/platform_efi/enable_avx.h>
 #include <src/platform/m256.h>
 
 #define EFI_TEXT(s) (CHAR16*)(L##s)
@@ -263,16 +262,6 @@ static void run_zero_benchmark(uint32_t iterations) {
     print_line(L""); // Blank line for spacing
 }
 
-// static void enableAVX()
-// {
-//     __writecr4(__readcr4() | 0x40000);
-//     _xsetbv(_XCR_XFEATURE_ENABLED_MASK, _xgetbv(_XCR_XFEATURE_ENABLED_MASK) | (7
-// #ifdef __AVX512F__
-//             | 224
-// #endif
-//             ));
-// }
-
 EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     // Suppress unused parameter warnings
     (void)ImageHandle;
@@ -288,7 +277,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     // Clear the screen
     gSystemTable->ConOut->ClearScreen(gSystemTable->ConOut);
 
-//    enableAVX();
+    enableAVX();
     print_line(L"UEFI m256i Benchmark Application");
     print_line(L"=================================");
 
