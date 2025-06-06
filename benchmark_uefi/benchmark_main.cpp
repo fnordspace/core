@@ -126,8 +126,8 @@ static void calibrate_tsc_frequency_minimal() {
 static void run_assignment_benchmark(uint32_t iterations) {
     print_line(L"--- Starting Assignment Benchmark ---");
 
-    m256i source(0,0,0,0);
-    m256i dest;
+    volatile m256i source(0,0,0,0);
+    volatile m256i dest;
     uint64_t accumulator = 0; // Not volatile, rely on printing.
 
     if (iterations == 0) {
@@ -216,7 +216,7 @@ static void run_setrandom_benchmark(uint32_t iterations) {
     unsigned long long start_tsc = __rdtsc();
     for (uint32_t i = 0; i < iterations; ++i) {
         val.setRandomValue();
-        accumulator += val.u32._0; // Use one part of the random value
+        accumulator += val.m256i_u64[0]; // Use one part of the random value
     }
     unsigned long long end_tsc = __rdtsc();
 
@@ -228,6 +228,30 @@ static void run_setrandom_benchmark(uint32_t iterations) {
     print_value_hex(L"Accumulator (SetRandom):", accumulator); // Value will be somewhat random
 
     print_line(L"--- SetRandom Benchmark Complete ---");
+    print_line(L""); // Blank line for spacing
+}
+
+static void run_rdrnd_benchmark(uint32_t iterations) {
+    print_line(L"--- Starting RdRnd Benchmark ---");
+
+    uint64_t accumulator = 0;
+
+    uint64_t rndValue = 0;
+    unsigned long long start_tsc = __rdtsc();
+    for (uint32_t i = 0; i < iterations; ++i) {
+        _rdrand64_step(&rndValue);
+        accumulator += rndValue; // Use one part of the random value
+    }
+    unsigned long long end_tsc = __rdtsc();
+
+    unsigned long long total_cycles = end_tsc - start_tsc;
+    unsigned long long avg_cycles_per_iteration = total_cycles / iterations;
+
+    print_value_hex(L"Total cycles (SetRandom):", total_cycles);
+    print_value_hex(L"Avg cycles per iteration (SetRandom):", avg_cycles_per_iteration);
+    print_value_hex(L"Accumulator (SetRandom):", accumulator); // Value will be somewhat random
+
+    print_line(L"--- RdRnd Benchmark Complete ---");
     print_line(L""); // Blank line for spacing
 }
 
@@ -296,7 +320,8 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     run_comparison_benchmark(iterations);
     run_setrandom_benchmark(iterations);
     run_zero_benchmark(iterations);
-    
+    run_rdrnd_benchmark(iterations);
+
     // Example of printing one of the m256i values (first u32 element)
     // This would require m256i to have a getter or a way to access its elements.
     // For now, we'll skip printing m256i contents to keep it simple.
