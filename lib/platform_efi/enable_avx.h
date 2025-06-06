@@ -52,7 +52,7 @@ static void enableAVX()
         // - AVX512 opmask (bit 5)
         // - AVX-512 upper 256 bits oZMM0-ZMM15 (bit 6) 
         // - AVX-512 ZMM16-ZMM31 (bit 7)
-        | 22
+        | 224
 #endif
         ));
 }
