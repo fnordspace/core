@@ -159,7 +159,7 @@ elseif(IS_CLANG OR IS_GCC)
     set(COMMON_C_FLAGS "-Wall -Wextra -fshort-wchar" CACHE INTERNAL "Common C compiler flags" FORCE)
     set(COMMON_CXX_FLAGS "${COMMON_C_FLAGS}" CACHE INTERNAL "Common C++ compiler flags" FORCE)
     set(COMMON_DEBUG_FLAGS "-g" CACHE INTERNAL "Common debug compiler flags" FORCE)
-    set(COMMON_RELEASE_FLAGS "-O2 -fomit-frame-pointer -fno-lto" CACHE INTERNAL "Common release compiler flags" FORCE)
+    set(COMMON_RELEASE_FLAGS "-O3 -fomit-frame-pointer -fno-lto" CACHE INTERNAL "Common release compiler flags" FORCE)
     set(COMMON_LINK_FLAGS "" CACHE INTERNAL "Common linker flags" FORCE)
     
     # Clang/GCC-specific EFI flags
