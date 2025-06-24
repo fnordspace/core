@@ -4,6 +4,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <ctime>
+#include "../lib/platform_common/compiler_warnings.h"
 
 #define NO_UEFI
 
@@ -37,16 +38,18 @@ void freePool(void* buffer)
     free(buffer);
 }
 
+SUPPRESS_WARNINGS_BEGIN
+IGNORE_DEPRECATED_UNSAFE_FUNCTIONS_WARNING
 void updateTime()
 {
     std::time_t t = std::time(nullptr);
     std::tm* tm = std::gmtime(&t);
-    utcTime.Year = tm->tm_year + 1900;
-    utcTime.Month = tm->tm_mon + 1;
-    utcTime.Day = tm->tm_mday;
-    utcTime.Hour = tm->tm_hour;
-    utcTime.Minute = tm->tm_min;
-    utcTime.Second = tm->tm_sec;
+    utcTime.Year = static_cast<unsigned short>(tm->tm_year + 1900);
+    utcTime.Month = static_cast<unsigned char>(tm->tm_mon + 1);
+    utcTime.Day = static_cast<unsigned char>(tm->tm_mday);
+    utcTime.Hour = static_cast<unsigned char>(tm->tm_hour);
+    utcTime.Minute = static_cast<unsigned char>(tm->tm_min);
+    utcTime.Second = static_cast<unsigned char>(tm->tm_sec);
     utcTime.Nanosecond = 0;
     utcTime.TimeZone = 0;
     utcTime.Daylight = 0;
@@ -56,5 +59,14 @@ unsigned long long now_ms()
 {
     std::time_t t = std::time(nullptr);
     std::tm* tm = std::gmtime(&t);
-    return ms(static_cast<unsigned char>(tm->tm_year % 100), tm->tm_mon, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec, 0);
+    return ms(
+        static_cast<unsigned char>(tm->tm_year % 100),
+        static_cast<unsigned char>(tm->tm_mon + 1),
+        static_cast<unsigned char>(tm->tm_mday),
+        static_cast<unsigned char>(tm->tm_hour),
+        static_cast<unsigned char>(tm->tm_min),
+        static_cast<unsigned char>(tm->tm_sec),
+        0
+    );
 }
+SUPPRESS_WARNINGS_END

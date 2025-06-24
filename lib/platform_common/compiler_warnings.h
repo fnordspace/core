@@ -23,6 +23,8 @@
     #define WARNING_IGNORE_UNUSED __pragma(warning(disable: 4100)) // C4100: 'identifier' : unreferenced formal parameter
     #define WARNING_IGNORE_SELFASSIGNMENT // No direct common MSVC equivalent for -Wself-assign-overloaded
     #define WARNING_IGNORE_CONVERSION_DATALOSS __pragma(warning(disable: 4310)) // C4310: cast truncates constant value
+    #define WARNING_IGNORE_DEPRECATED_UNSAFE_FUNCTIONS __pragma(warning(disable: 4996)) // Ignore C4996 for deprecated functions like gmtime
+
 
 #elif defined(__clang__)
     #define PRAGMA(x) _Pragma(#x)
@@ -32,6 +34,7 @@
     #define WARNING_IGNORE_UNUSED PRAGMA(clang diagnostic ignored "-Wunused-parameter")
     #define WARNING_IGNORE_SELFASSIGNMENT PRAGMA(clang diagnostic ignored "-Wself-assign-overloaded")
     #define WARNING_IGNORE_CONVERSION_DATALOSS PRAGMA(clang diagnostic ignored "-Wconversion")
+    #define WARNING_IGNORE_DEPRECATED_UNSAFE_FUNCTIONS // No direct equivalent for C4996 
 
 #else
     #define WARNING_PUSH
@@ -40,6 +43,7 @@
     #define WARNING_IGNORE_UNUSED
     #define WARNING_IGNORE_SELFASSIGNMENT
     #define WARNING_IGNORE_CONVERSION_DATALOSS
+    #define WARNING_IGNORE_DEPRECATED_UNSAFE_FUNCTIONS
 #endif
 
 // Shortcuts
@@ -49,4 +53,4 @@
 #define IGNORE_UNUSED_WARNING WARNING_IGNORE_UNUSED
 #define IGNORE_SELFASSIGNMENT_WARNING WARNING_IGNORE_SELFASSIGNMENT
 #define IGNORE_CONVERSION_DATALOSS_WARNING WARNING_IGNORE_CONVERSION_DATALOSS
-
+#define IGNORE_DEPRECATED_UNSAFE_FUNCTIONS_WARNING WARNING_IGNORE_DEPRECATED_UNSAFE_FUNCTIONS
