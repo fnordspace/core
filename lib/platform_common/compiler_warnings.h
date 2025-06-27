@@ -24,8 +24,6 @@
     #define WARNING_IGNORE_SELFASSIGNMENT // No direct common MSVC equivalent for -Wself-assign-overloaded
     #define WARNING_IGNORE_CONVERSION_DATALOSS __pragma(warning(disable: 4310)) // C4310: cast truncates constant value
     #define WARNING_IGNORE_DEPRECATED_UNSAFE_FUNCTIONS __pragma(warning(disable: 4996)) // Ignore C4996 for deprecated functions like gmtime
-
-
 #elif defined(__clang__)
     #define PRAGMA(x) _Pragma(#x)
     #define WARNING_PUSH PRAGMA(clang diagnostic push)
@@ -35,7 +33,6 @@
     #define WARNING_IGNORE_SELFASSIGNMENT PRAGMA(clang diagnostic ignored "-Wself-assign-overloaded")
     #define WARNING_IGNORE_CONVERSION_DATALOSS PRAGMA(clang diagnostic ignored "-Wconversion")
     #define WARNING_IGNORE_DEPRECATED_UNSAFE_FUNCTIONS // No direct equivalent for C4996 
-
 #else
     #define WARNING_PUSH
     #define WARNING_POP
