@@ -28,7 +28,7 @@ include_directories(${PROJECT_ROOT_DIR})
 add_executable(
   qubic_core_tests
   # assets.cpp
-  # common_def.cpp
+  common_def.cpp
   # contract_core.cpp
   # contract_qearn.cpp
   # contract_qvault.cpp

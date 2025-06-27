@@ -1,6 +1,9 @@
 #define NO_UEFI
 #define DEFINE_VARIABLES_SHARED_BETWEEN_COMPILE_UNITS
 
+#include "platform/time.h"
+
+/*
 #include "contract_testing.h"
 #include "logging_test.h"
 #include "platform/concurrency_impl.h"
@@ -24,3 +27,5 @@ void notifyContractOfIncomingTransfer(const m256i& source, const m256i& dest, lo
     QPI::PostIncomingTransfer_input input{ source, amount, type };
     qpiContext.call(input);
 }
+
+*/
