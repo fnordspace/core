@@ -1,0 +1,192 @@
+name: Compile Checks
+
+# Trigger the workflow on pushes to the ci-runner branch
+on:
+  push:
+    branches:
+      - ci-runner
+  workflow_dispatch:
+
+env:
+  # --- MSBuild specific ---
+  SOLUTION_FILE_PATH: .
+  MSBUILD_BUILD_CONFIGURATION: Release
+
+  # --- CMake specific ---
+  CMAKE_BUILD_CONFIGURATION: Release
+  CMAKE_BUILD_DIR_TESTS_ON: build_tests_on
+  CMAKE_BUILD_DIR_TESTS_OFF: build_tests_off
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          # Config 1: Windows MSVC (MSBuild System)
+          - os: windows-latest
+            compiler: msvc
+            build_system: msbuild
+            build_variant: 'win_msvc_msbuild'
+
+          # Config 2: Windows Clang CMake (Tests ON)
+          # - os: windows-latest
+          #   compiler: clang
+          #   build_system: cmake
+          #   build_variant: 'win_clang_cmake_tests_on'
+          #   cmake_generator: "Ninja"
+          #   cmake_c_compiler: clang
+          #   cmake_cxx_compiler: clang++
+          #   build_tests_flag: 'ON'
+
+          # Config 3: Windows Clang CMake (Tests OFF)
+          # - os: windows-latest
+          #   compiler: clang
+          #   build_system: cmake
+          #   build_variant: 'win_clang_cmake_tests_off'
+          #   cmake_generator: "Ninja"
+          #   cmake_c_compiler: clang
+          #   cmake_cxx_compiler: clang++
+          #   build_tests_flag: 'OFF'
+
+          # Config 4: Linux Clang CMake (Tests ON)
+          - os: ubuntu-latest
+            compiler: clang
+            build_system: cmake
+            build_variant: 'linux_clang_cmake_tests_on'
+            cmake_generator: "Ninja"
+            cmake_c_compiler: clang
+            cmake_cxx_compiler: clang++
+            build_tests_flag: 'ON'
+            build_efi_flag: 'OFF'
+
+          # Config 5: Linux Clang CMake (Tests OFF)
+          # - os: ubuntu-latest
+          #   compiler: clang
+          #   build_system: cmake
+          #   build_variant: 'linux_clang_cmake_tests_off'
+          #   cmake_generator: "Ninja"
+          #   cmake_c_compiler: clang
+          #   cmake_cxx_compiler: clang++
+          #   build_tests_flag: 'OFF'
+
+          # Config 6: Windows MSVC CMake (Tests ON) - Auto-detect compiler
+          - os: windows-latest
+            compiler: msvc
+            build_system: cmake
+            build_variant: 'win_msvc_cmake_tests_on'
+            cmake_generator: "Ninja"
+            # No explicit C/CXX compiler needed - rely on setup-msbuild env
+            build_tests_flag: 'ON'
+            build_efi_flag: 'OFF'
+
+          # Config 7: Windows MSVC CMake (Tests OFF) - Auto-detect compiler
+          # - os: windows-latest
+          #   compiler: msvc
+          #   build_system: cmake
+          #   build_variant: 'win_msvc_cmake_tests_off'
+          #   cmake_generator: "Ninja"
+          #   # No explicit C/CXX compiler needed - rely on setup-msbuild env
+          #   build_tests_flag: 'OFF'
+
+    name: ${{ matrix.config.build_variant }} (${{ matrix.config.os }})
+    runs-on: ${{ matrix.config.os }}
+    # All jobs will run, but build steps may be skipped based on input parameters
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # --- === Setup Phase === ---
+      - name: Add MSBuild to PATH (Windows MSVC Env Setup)
+        if: runner.os == 'Windows' && (matrix.config.build_system == 'msbuild' || (matrix.config.build_system == 'cmake' && matrix.config.compiler == 'msvc'))
+        uses: microsoft/setup-msbuild@v1.3.1
+        with:
+          vs-version: 'latest'
+          
+      - name: Setup Visual C++ Environment (Windows MSVC)
+        if: runner.os == 'Windows' && matrix.config.compiler == 'msvc'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Setup NuGet (Windows MSBuild System Only)
+        if: matrix.config.build_system == 'msbuild'
+        uses: NuGet/setup-nuget@v2
+        with:
+          nuget-version: 'latest'
+
+      - name: Install Clang, CMake, Ninja (Linux Clang Build Only)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build nasm
+
+      - name: Install Clang/LLVM (Windows Clang Build Only)
+        if: runner.os == 'Windows' && matrix.config.compiler == 'clang'
+        run: choco install llvm --installargs 'ADD_CMAKE_MODULE_PATH=ON'
+        shell: pwsh
+
+      - name: Install Ninja (Windows CMake Builds)
+        if: runner.os == 'Windows' && matrix.config.build_system == 'cmake'
+        run: choco install ninja
+        shell: pwsh
+
+      # --- === Build Phase === ---
+
+      # == MSBuild Path (Windows/MSVC) ==
+      - name: Restore NuGet packages (MSVC Build)
+        if: matrix.config.build_system == 'msbuild'
+        working-directory: ${{ github.workspace }}
+        run: nuget restore ${{ env.SOLUTION_FILE_PATH }}
+
+      - name: Build Solution with MSBuild (MSVC Build)
+        if: matrix.config.build_system == 'msbuild'
+        run: msbuild /m /p:Configuration=${{ env.MSBUILD_BUILD_CONFIGURATION }} ${{ env.SOLUTION_FILE_PATH }}
+
+      # == CMake Path ==
+
+      # Configure CMake (Windows MSVC -> Use pwsh, NO explicit compiler flags)
+      - name: Configure CMake (Windows MSVC)
+        if: matrix.config.build_system == 'cmake' && runner.os == 'Windows' && matrix.config.compiler == 'msvc'
+        shell: pwsh # Use PowerShell for Windows MSVC builds
+        run: |
+          echo "--- Configuring CMake for BUILD_TESTS=ON in ${{ env.CMAKE_BUILD_DIR_TESTS_ON }} (pwsh, auto-detect compiler) ---"
+          cmake -S . -B ${{ env.CMAKE_BUILD_DIR_TESTS_ON }} -G "${{ matrix.config.cmake_generator }}" -D BUILD_TESTS:BOOL=${{ matrix.config.build_tests_flag }} -D BUILD_EFI:BOOL=${{ matrix.config.build_efi_flag }} -D CMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_CONFIGURATION }} -D ENABLE_AVX512=ON
+
+          echo "--- Configuring CMake for BUILD_TESTS=OFF in ${{ env.CMAKE_BUILD_DIR_TESTS_OFF }} (pwsh, auto-detect compiler) ---"
+          cmake -S . -B ${{ env.CMAKE_BUILD_DIR_TESTS_OFF }} -G "${{ matrix.config.cmake_generator }}" -D BUILD_TESTS:BOOL=${{ matrix.config.build_tests_flag }} -D BUILD_EFI:BOOL=${{ matrix.config.build_efi_flag }} -D CMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_CONFIGURATION }} -D ENABLE_AVX512=ON
+
+      # Configure CMake (Other OS/Compiler -> Use bash, requires explicit compiler flags)
+      - name: Configure CMake (Other OS/Compiler)
+        if: matrix.config.build_system == 'cmake' && !(runner.os == 'Windows' && matrix.config.compiler == 'msvc')
+        shell: bash # Use Bash for Linux or Windows Clang builds
+        run: |
+          echo "--- Configuring CMake for BUILD_TESTS=ON in ${{ env.CMAKE_BUILD_DIR_TESTS_ON }} (bash) ---"
+          cmake -S . -B ${{ env.CMAKE_BUILD_DIR_TESTS_ON }} -G "${{ matrix.config.cmake_generator }}" -D CMAKE_C_COMPILER=${{ matrix.config.cmake_c_compiler }} -D CMAKE_CXX_COMPILER=${{ matrix.config.cmake_cxx_compiler }} -D BUILD_EFI:BOOL=${{ matrix.config.build_efi_flag }} -D BUILD_TESTS:BOOL=${{ matrix.config.build_tests_flag }} -D CMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_CONFIGURATION }} -D ENABLE_AVX512=ON
+
+          echo "--- Configuring CMake for BUILD_TESTS=OFF in ${{ env.CMAKE_BUILD_DIR_TESTS_OFF }} (bash) ---"
+          cmake -S . -B ${{ env.CMAKE_BUILD_DIR_TESTS_OFF }} -G "${{ matrix.config.cmake_generator }}" -D CMAKE_C_COMPILER=${{ matrix.config.cmake_c_compiler }} -D CMAKE_CXX_COMPILER=${{ matrix.config.cmake_cxx_compiler }} -D BUILD_EFI:BOOL=${{ matrix.config.build_efi_flag }} -D BUILD_TESTS:BOOL=${{ matrix.config.build_tests_flag }} -D CMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_CONFIGURATION }} -D ENABLE_AVX512=ON
+
+      # Build with CMake (Windows MSVC -> Use pwsh)
+      - name: Build with CMake (Windows MSVC)
+        if: matrix.config.build_system == 'cmake' && runner.os == 'Windows' && matrix.config.compiler == 'msvc'
+        shell: pwsh
+        run: |
+          echo "--- Building CMake for BUILD_TESTS=ON from ${{ env.CMAKE_BUILD_DIR_TESTS_ON }} (pwsh) ---"
+          cmake --build ${{ env.CMAKE_BUILD_DIR_TESTS_ON }} --config ${{ env.CMAKE_BUILD_CONFIGURATION }} --parallel
+
+          echo "--- Building CMake for BUILD_TESTS=OFF from ${{ env.CMAKE_BUILD_DIR_TESTS_OFF }} (pwsh) ---"
+          cmake --build ${{ env.CMAKE_BUILD_DIR_TESTS_OFF }} --config ${{ env.CMAKE_BUILD_CONFIGURATION }} --parallel
+
+      # Build with CMake (Other OS/Compiler -> Use bash)
+      - name: Build with CMake (Other OS/Compiler)
+        if: matrix.config.build_system == 'cmake' && !(runner.os == 'Windows' && matrix.config.compiler == 'msvc')
+        shell: bash
+        run: |
+          echo "--- Building CMake for BUILD_TESTS=ON from ${{ env.CMAKE_BUILD_DIR_TESTS_ON }} (bash) ---"
+          cmake --build ${{ env.CMAKE_BUILD_DIR_TESTS_ON }} --config ${{ env.CMAKE_BUILD_CONFIGURATION }} --parallel
+
+          echo "--- Building CMake for BUILD_TESTS=OFF from ${{ env.CMAKE_BUILD_DIR_TESTS_OFF }} (bash) ---"
+          cmake --build ${{ env.CMAKE_BUILD_DIR_TESTS_OFF }} --config ${{ env.CMAKE_BUILD_CONFIGURATION }} --parallel
