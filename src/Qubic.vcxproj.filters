@@ -127,6 +127,7 @@
       <Filter>contracts</Filter>
     </ClInclude>
     <ClInclude Include="contracts\QIP.h">
+    <ClInclude Include="contracts\QNSRegistry.h">
       <Filter>contracts</Filter>
     </ClInclude>
     <ClInclude Include="contract_core\contract_def.h">
