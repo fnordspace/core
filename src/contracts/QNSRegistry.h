@@ -336,8 +336,13 @@ struct QNS_REGISTRY : public ContractBase
         output.success = true;
     }
 
+    // Locals struct for INITIALIZE
+    struct INITIALIZE_locals {
+        NameRecord rootRecord;
+    };
+
     // System procedures
-    INITIALIZE()
+    INITIALIZE_WITH_LOCALS()
     {
         // Initialize state
         state.nameRegistry.reset();
@@ -346,15 +351,14 @@ struct QNS_REGISTRY : public ContractBase
         state.maxSubdomainDepth = 10;  // Maximum 10 levels of subdomains
         
         // Create root .qubic node
-        NameRecord rootRecord;
-        rootRecord.owner = SELF;  // Contract owns the root
-        rootRecord.resolver = NULL_ID;
-        rootRecord.ttl = 0;
-        rootRecord.parentNode = 0;  // Root has no parent
-        rootRecord.createdAt = qpi.tick();
-        rootRecord.isActive = true;
+        locals.rootRecord.owner = SELF;  // Contract owns the root
+        locals.rootRecord.resolver = NULL_ID;
+        locals.rootRecord.ttl = 0;
+        locals.rootRecord.parentNode = 0;  // Root has no parent
+        locals.rootRecord.createdAt = qpi.tick();
+        locals.rootRecord.isActive = true;
         
-        state.nameRegistry.set(QUBIC_ROOT_NODE, rootRecord);
+        state.nameRegistry.set(QUBIC_ROOT_NODE, locals.rootRecord);
         state.totalNames = 1;
     }
 

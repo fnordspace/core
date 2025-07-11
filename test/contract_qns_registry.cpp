@@ -27,14 +27,6 @@ public:
     }
 
     // Procedure helpers
-    QNS_REGISTRY::SetRootOwner_output setRootOwner(const id& newOwner, const id& caller) {
-        QNS_REGISTRY::SetRootOwner_input input;
-        QNS_REGISTRY::SetRootOwner_output output;
-        memset(&output, 0, sizeof(output));
-        input.newOwner = newOwner;
-        invokeUserProcedure(QNS_REGISTRY_CONTRACT_INDEX, 5, input, output, caller, 0);
-        return output;
-    }
 
     QNS_REGISTRY::SetSubnodeOwner_output createSubdomain(uint64 parentNode, uint64 labelHash, const id& owner, const id& caller) {
         QNS_REGISTRY::SetSubnodeOwner_input input;
@@ -129,4 +121,58 @@ static id createTestId(uint64 value) {
     return m256i(value, 0, 0, 0);
 }
 
-// Tests will be added incrementally following proper testing patterns
+// Phase 2: Basic initialization tests
+TEST(QNSRegistryTest, ContractInitialization) {
+    ContractTestingQNSRegistry test;
+    
+    // Verify contract state is properly initialized
+    auto* state = test.getState();
+    EXPECT_EQ(state->totalNames, 1u);  // Root node should exist
+    
+    // Verify root node exists
+    auto nodeExists = test.nodeExists(QNS_REGISTRY::QUBIC_ROOT_NODE);
+    EXPECT_TRUE(nodeExists.exists);
+}
+
+TEST(QNSRegistryTest, RootNodeProperties) {
+    ContractTestingQNSRegistry test;
+    
+    // Check root node owner (owned by contract itself)
+    auto ownerResult = test.getOwner(QNS_REGISTRY::QUBIC_ROOT_NODE);
+    EXPECT_TRUE(ownerResult.exists);
+    EXPECT_EQ(ownerResult.owner, id(QNS_REGISTRY_CONTRACT_INDEX, 0, 0, 0));
+    
+    // Check root node resolver (initially null)
+    auto resolverResult = test.getResolver(QNS_REGISTRY::QUBIC_ROOT_NODE);
+    EXPECT_TRUE(resolverResult.exists);
+    EXPECT_EQ(resolverResult.resolver, NULL_ID);
+    
+    // Check root node TTL (initially 0)
+    auto ttlResult = test.getTTL(QNS_REGISTRY::QUBIC_ROOT_NODE);
+    EXPECT_TRUE(ttlResult.exists);
+    EXPECT_EQ(ttlResult.ttl, 0u);
+    
+    // Check root node parent (root has no parent)
+    auto parentResult = test.getParent(QNS_REGISTRY::QUBIC_ROOT_NODE);
+    EXPECT_TRUE(parentResult.exists);
+    EXPECT_EQ(parentResult.parentNode, 0u);
+}
+
+TEST(QNSRegistryTest, EpochProcedures) {
+    ContractTestingQNSRegistry test;
+    
+    // Verify initial state
+    auto* state = test.getState();
+    EXPECT_EQ(state->totalNames, 1u);
+    
+    // Call epoch procedures
+    test.beginEpoch();
+    test.endEpoch();
+    
+    // Verify state is preserved after epoch procedures
+    EXPECT_EQ(state->totalNames, 1u);
+    
+    // Verify root node still exists and functions work
+    auto nodeExists = test.nodeExists(QNS_REGISTRY::QUBIC_ROOT_NODE);
+    EXPECT_TRUE(nodeExists.exists);
+}
