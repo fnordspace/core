@@ -376,3 +376,62 @@ TEST(QNSRegistryTest, CreateSubdomainWithZeroParent) {
         EXPECT_EQ(state->totalNames, 1u); // Should remain unchanged
     }
 }
+
+// Phase 6: Domain property management tests
+TEST(QNSRegistryTest, SetResolverProcedure) {
+    ContractTestingQNSRegistry test;
+    
+    id contractOwner = id(QNS_REGISTRY_CONTRACT_INDEX, 0, 0, 0);
+    id testResolver = createTestId(11111);
+    id unauthorizedUser = createTestId(99999);
+    
+    // Test setting resolver on root node (should fail - authorization check)
+    auto result = test.setResolver(QNS_REGISTRY::QUBIC_ROOT_NODE, testResolver, contractOwner);
+    EXPECT_FALSE(result.success); // Should fail due to authorization in test framework
+    
+    // Test setting resolver on non-existent node (should fail)
+    uint64 nonExistentNode = 0x1234567890ABCDEFULL;
+    auto nonExistentResult = test.setResolver(nonExistentNode, testResolver, contractOwner);
+    EXPECT_FALSE(nonExistentResult.success);
+    
+    // Test unauthorized resolver setting (should fail)
+    auto unauthorizedResult = test.setResolver(QNS_REGISTRY::QUBIC_ROOT_NODE, testResolver, unauthorizedUser);
+    EXPECT_FALSE(unauthorizedResult.success);
+}
+
+TEST(QNSRegistryTest, SetTTLProcedure) {
+    ContractTestingQNSRegistry test;
+    
+    id contractOwner = id(QNS_REGISTRY_CONTRACT_INDEX, 0, 0, 0);
+    uint32 testTTL = 3600; // 1 hour TTL
+    id unauthorizedUser = createTestId(99999);
+    
+    // Test setting TTL on root node (should fail - authorization check)
+    auto result = test.setTTL(QNS_REGISTRY::QUBIC_ROOT_NODE, testTTL, contractOwner);
+    EXPECT_FALSE(result.success); // Should fail due to authorization in test framework
+    
+    // Test setting TTL on non-existent node (should fail)
+    uint64 nonExistentNode = 0x1234567890ABCDEFULL;
+    auto nonExistentResult = test.setTTL(nonExistentNode, testTTL, contractOwner);
+    EXPECT_FALSE(nonExistentResult.success);
+    
+    // Test unauthorized TTL setting (should fail)
+    auto unauthorizedResult = test.setTTL(QNS_REGISTRY::QUBIC_ROOT_NODE, testTTL, unauthorizedUser);
+    EXPECT_FALSE(unauthorizedResult.success);
+}
+
+TEST(QNSRegistryTest, SetTTLWithZeroValue) {
+    ContractTestingQNSRegistry test;
+    
+    id contractOwner = id(QNS_REGISTRY_CONTRACT_INDEX, 0, 0, 0);
+    uint32 zeroTTL = 0;
+    
+    // Test setting TTL to zero (should test procedure execution)
+    auto result = test.setTTL(QNS_REGISTRY::QUBIC_ROOT_NODE, zeroTTL, contractOwner);
+    EXPECT_FALSE(result.success); // Should fail due to authorization in test framework
+    
+    // Verify initial TTL is still 0
+    auto ttlResult = test.getTTL(QNS_REGISTRY::QUBIC_ROOT_NODE);
+    EXPECT_TRUE(ttlResult.exists);
+    EXPECT_EQ(ttlResult.ttl, 0u);
+}
