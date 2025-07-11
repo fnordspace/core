@@ -254,3 +254,41 @@ TEST(QNSRegistryTest, GetParentFunction) {
     auto nonExistentParent = test.getParent(0x1234567890ABCDEFULL);
     EXPECT_FALSE(nonExistentParent.exists);
 }
+
+// Phase 4: Ownership management tests
+TEST(QNSRegistryTest, SetOwnerProcedure) {
+    ContractTestingQNSRegistry test;
+    
+    id contractOwner = id(QNS_REGISTRY_CONTRACT_INDEX, 0, 0, 0);
+    id newOwner = createTestId(12345);
+    id unauthorizedUser = createTestId(99999);
+    
+    // Test unauthorized transfer attempt first (should fail)
+    auto unauthorizedResult = test.transferOwnership(QNS_REGISTRY::QUBIC_ROOT_NODE, unauthorizedUser, unauthorizedUser);
+    EXPECT_FALSE(unauthorizedResult.success);
+    
+    // Verify ownership unchanged (still contract owner)
+    auto originalOwner = test.getOwner(QNS_REGISTRY::QUBIC_ROOT_NODE);
+    EXPECT_TRUE(originalOwner.exists);
+    EXPECT_EQ(originalOwner.owner, contractOwner);
+    
+    // Test setting owner on non-existent node (should fail)
+    uint64 nonExistentNode = 0x1234567890ABCDEFULL;
+    auto nonExistentResult = test.transferOwnership(nonExistentNode, newOwner, contractOwner);
+    EXPECT_FALSE(nonExistentResult.success);
+}
+
+TEST(QNSRegistryTest, SetOwnerNonExistentNode) {
+    ContractTestingQNSRegistry test;
+    
+    id testUser = createTestId(12345);
+    uint64 nonExistentNode = 0x1234567890ABCDEFULL;
+    
+    // Test setting owner on non-existent node
+    auto result = test.transferOwnership(nonExistentNode, testUser, testUser);
+    EXPECT_FALSE(result.success);
+    
+    // Verify node still doesn't exist
+    auto nodeExists = test.nodeExists(nonExistentNode);
+    EXPECT_FALSE(nodeExists.exists);
+}
