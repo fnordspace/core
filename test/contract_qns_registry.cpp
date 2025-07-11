@@ -176,3 +176,81 @@ TEST(QNSRegistryTest, EpochProcedures) {
     auto nodeExists = test.nodeExists(QNS_REGISTRY::QUBIC_ROOT_NODE);
     EXPECT_TRUE(nodeExists.exists);
 }
+
+// Phase 3: Query function tests
+TEST(QNSRegistryTest, NodeExistsFunction) {
+    ContractTestingQNSRegistry test;
+    
+    // Test with root node (should exist)
+    auto rootExists = test.nodeExists(QNS_REGISTRY::QUBIC_ROOT_NODE);
+    EXPECT_TRUE(rootExists.exists);
+    
+    // Test with non-existent nodes
+    auto nonExistent1 = test.nodeExists(0x1234567890ABCDEFULL);
+    EXPECT_FALSE(nonExistent1.exists);
+    
+    auto nonExistent2 = test.nodeExists(0xFFFFFFFFFFFFFFFFULL);
+    EXPECT_FALSE(nonExistent2.exists);
+    
+    // Test edge cases
+    auto zeroNode = test.nodeExists(0ULL);
+    EXPECT_FALSE(zeroNode.exists);
+}
+
+TEST(QNSRegistryTest, GetOwnerFunction) {
+    ContractTestingQNSRegistry test;
+    
+    // Test with root node (should be owned by contract)
+    auto rootOwner = test.getOwner(QNS_REGISTRY::QUBIC_ROOT_NODE);
+    EXPECT_TRUE(rootOwner.exists);
+    EXPECT_EQ(rootOwner.owner, id(QNS_REGISTRY_CONTRACT_INDEX, 0, 0, 0));
+    
+    // Test with non-existent nodes
+    auto nonExistentOwner1 = test.getOwner(0x1234567890ABCDEFULL);
+    EXPECT_FALSE(nonExistentOwner1.exists);
+    
+    auto nonExistentOwner2 = test.getOwner(0ULL);
+    EXPECT_FALSE(nonExistentOwner2.exists);
+    
+    auto nonExistentOwner3 = test.getOwner(0xFFFFFFFFFFFFFFFFULL);
+    EXPECT_FALSE(nonExistentOwner3.exists);
+}
+
+TEST(QNSRegistryTest, GetResolverFunction) {
+    ContractTestingQNSRegistry test;
+    
+    // Test with root node (should have NULL_ID resolver initially)
+    auto rootResolver = test.getResolver(QNS_REGISTRY::QUBIC_ROOT_NODE);
+    EXPECT_TRUE(rootResolver.exists);
+    EXPECT_EQ(rootResolver.resolver, NULL_ID);
+    
+    // Test with non-existent nodes
+    auto nonExistentResolver = test.getResolver(0x1234567890ABCDEFULL);
+    EXPECT_FALSE(nonExistentResolver.exists);
+}
+
+TEST(QNSRegistryTest, GetTTLFunction) {
+    ContractTestingQNSRegistry test;
+    
+    // Test with root node (should have 0 TTL initially)
+    auto rootTTL = test.getTTL(QNS_REGISTRY::QUBIC_ROOT_NODE);
+    EXPECT_TRUE(rootTTL.exists);
+    EXPECT_EQ(rootTTL.ttl, 0u);
+    
+    // Test with non-existent nodes
+    auto nonExistentTTL = test.getTTL(0x1234567890ABCDEFULL);
+    EXPECT_FALSE(nonExistentTTL.exists);
+}
+
+TEST(QNSRegistryTest, GetParentFunction) {
+    ContractTestingQNSRegistry test;
+    
+    // Test with root node (should have no parent - 0)
+    auto rootParent = test.getParent(QNS_REGISTRY::QUBIC_ROOT_NODE);
+    EXPECT_TRUE(rootParent.exists);
+    EXPECT_EQ(rootParent.parentNode, 0u);
+    
+    // Test with non-existent nodes
+    auto nonExistentParent = test.getParent(0x1234567890ABCDEFULL);
+    EXPECT_FALSE(nonExistentParent.exists);
+}
