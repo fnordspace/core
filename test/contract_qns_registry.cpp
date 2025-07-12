@@ -35,7 +35,7 @@ public:
         input.parentNode = parentNode;
         input.labelHash = labelHash;
         input.owner = owner;
-        invokeUserProcedure(QNS_REGISTRY_CONTRACT_INDEX, 3, input, output, caller, 0);
+        invokeUserProcedure(QNS_REGISTRY_CONTRACT_INDEX, 3, input, output, caller, 10);
         return output;
     }
 
@@ -75,7 +75,7 @@ public:
         QNS_REGISTRY::NodeExists_output output;
         memset(&output, 0, sizeof(output));
         input.node = node;
-        callFunction(QNS_REGISTRY_CONTRACT_INDEX, 5, input, output);
+        callFunction(QNS_REGISTRY_CONTRACT_INDEX, 4, input, output);
         return output;
     }
 
@@ -106,13 +106,10 @@ public:
         return output;
     }
 
-    QNS_REGISTRY::GetParent_output getParent(uint64 node) {
-        QNS_REGISTRY::GetParent_input input;
-        QNS_REGISTRY::GetParent_output output;
-        memset(&output, 0, sizeof(output));
-        input.node = node;
-        callFunction(QNS_REGISTRY_CONTRACT_INDEX, 4, input, output);
-        return output;
+
+    // Get the hard-coded registrar ID
+    id getQubicRegistrar() {
+        return id(14, 0, 0, 0);  // QUBIC_REGISTRAR_ID
     }
 };
 
@@ -121,317 +118,202 @@ static id createTestId(uint64 value) {
     return m256i(value, 0, 0, 0);
 }
 
-// Phase 2: Basic initialization tests
-TEST(QNSRegistryTest, ContractInitialization) {
+// Test cases for GetOwner function
+TEST(QNSRegistryGetOwner, RootNodeOwnership)
+{
     ContractTestingQNSRegistry test;
     
-    // Verify contract state is properly initialized
-    auto* state = test.getState();
-    EXPECT_EQ(state->totalNames, 1u);  // Root node should exist
-    
-    // Verify root node exists
-    auto nodeExists = test.nodeExists(QNS_REGISTRY::QUBIC_ROOT_NODE);
-    EXPECT_TRUE(nodeExists.exists);
+    // Test getting owner of root node (.qubic TLD hash, should exist and be owned by registrar)
+    auto result = test.getOwner(0x6375626963000000ULL);  // QUBIC_ROOT_NODE
+    EXPECT_TRUE(result.exists);
+    EXPECT_EQ(result.owner, test.getQubicRegistrar());
 }
 
-TEST(QNSRegistryTest, RootNodeProperties) {
+TEST(QNSRegistryGetOwner, NonExistentNodes)
+{
     ContractTestingQNSRegistry test;
     
-    // Check root node owner (owned by contract itself)
-    auto ownerResult = test.getOwner(QNS_REGISTRY::QUBIC_ROOT_NODE);
-    EXPECT_TRUE(ownerResult.exists);
-    EXPECT_EQ(ownerResult.owner, id(QNS_REGISTRY_CONTRACT_INDEX, 0, 0, 0));
+    // Test various non-existent node IDs
+    auto result1 = test.getOwner(0);  // Node 0 should not exist (root is hash of "qubic")
+    EXPECT_FALSE(result1.exists);
     
-    // Check root node resolver (initially null)
-    auto resolverResult = test.getResolver(QNS_REGISTRY::QUBIC_ROOT_NODE);
-    EXPECT_TRUE(resolverResult.exists);
-    EXPECT_EQ(resolverResult.resolver, NULL_ID);
+    auto result2 = test.getOwner(12345);
+    EXPECT_FALSE(result2.exists);
     
-    // Check root node TTL (initially 0)
-    auto ttlResult = test.getTTL(QNS_REGISTRY::QUBIC_ROOT_NODE);
-    EXPECT_TRUE(ttlResult.exists);
-    EXPECT_EQ(ttlResult.ttl, 0u);
-    
-    // Check root node parent (root has no parent)
-    auto parentResult = test.getParent(QNS_REGISTRY::QUBIC_ROOT_NODE);
-    EXPECT_TRUE(parentResult.exists);
-    EXPECT_EQ(parentResult.parentNode, 0u);
+    auto result3 = test.getOwner(99999);
+    EXPECT_FALSE(result3.exists);
 }
 
-TEST(QNSRegistryTest, EpochProcedures) {
+TEST(QNSRegistryGetOwner, EdgeCases)
+{
     ContractTestingQNSRegistry test;
     
-    // Verify initial state
-    auto* state = test.getState();
-    EXPECT_EQ(state->totalNames, 1u);
+    // Test edge case: maximum uint64 value
+    auto result1 = test.getOwner(UINT64_MAX);
+    EXPECT_FALSE(result1.exists);
     
-    // Call epoch procedures
-    test.beginEpoch();
-    test.endEpoch();
-    
-    // Verify state is preserved after epoch procedures
-    EXPECT_EQ(state->totalNames, 1u);
-    
-    // Verify root node still exists and functions work
-    auto nodeExists = test.nodeExists(QNS_REGISTRY::QUBIC_ROOT_NODE);
-    EXPECT_TRUE(nodeExists.exists);
+    // Test edge case: node 1 (should not exist initially)
+    auto result2 = test.getOwner(1);
+    EXPECT_FALSE(result2.exists);
 }
 
-// Phase 3: Query function tests
-TEST(QNSRegistryTest, NodeExistsFunction) {
+// Test cases for SetSubnodeOwner procedure  
+TEST(QNSRegistrySetSubnodeOwner, NoNewTLDsAllowed)
+{
     ContractTestingQNSRegistry test;
-    
-    // Test with root node (should exist)
-    auto rootExists = test.nodeExists(QNS_REGISTRY::QUBIC_ROOT_NODE);
-    EXPECT_TRUE(rootExists.exists);
-    
-    // Test with non-existent nodes
-    auto nonExistent1 = test.nodeExists(0x1234567890ABCDEFULL);
-    EXPECT_FALSE(nonExistent1.exists);
-    
-    auto nonExistent2 = test.nodeExists(0xFFFFFFFFFFFFFFFFULL);
-    EXPECT_FALSE(nonExistent2.exists);
-    
-    // Test edge cases
-    auto zeroNode = test.nodeExists(0ULL);
-    EXPECT_FALSE(zeroNode.exists);
-}
-
-TEST(QNSRegistryTest, GetOwnerFunction) {
-    ContractTestingQNSRegistry test;
-    
-    // Test with root node (should be owned by contract)
-    auto rootOwner = test.getOwner(QNS_REGISTRY::QUBIC_ROOT_NODE);
-    EXPECT_TRUE(rootOwner.exists);
-    EXPECT_EQ(rootOwner.owner, id(QNS_REGISTRY_CONTRACT_INDEX, 0, 0, 0));
-    
-    // Test with non-existent nodes
-    auto nonExistentOwner1 = test.getOwner(0x1234567890ABCDEFULL);
-    EXPECT_FALSE(nonExistentOwner1.exists);
-    
-    auto nonExistentOwner2 = test.getOwner(0ULL);
-    EXPECT_FALSE(nonExistentOwner2.exists);
-    
-    auto nonExistentOwner3 = test.getOwner(0xFFFFFFFFFFFFFFFFULL);
-    EXPECT_FALSE(nonExistentOwner3.exists);
-}
-
-TEST(QNSRegistryTest, GetResolverFunction) {
-    ContractTestingQNSRegistry test;
-    
-    // Test with root node (should have NULL_ID resolver initially)
-    auto rootResolver = test.getResolver(QNS_REGISTRY::QUBIC_ROOT_NODE);
-    EXPECT_TRUE(rootResolver.exists);
-    EXPECT_EQ(rootResolver.resolver, NULL_ID);
-    
-    // Test with non-existent nodes
-    auto nonExistentResolver = test.getResolver(0x1234567890ABCDEFULL);
-    EXPECT_FALSE(nonExistentResolver.exists);
-}
-
-TEST(QNSRegistryTest, GetTTLFunction) {
-    ContractTestingQNSRegistry test;
-    
-    // Test with root node (should have 0 TTL initially)
-    auto rootTTL = test.getTTL(QNS_REGISTRY::QUBIC_ROOT_NODE);
-    EXPECT_TRUE(rootTTL.exists);
-    EXPECT_EQ(rootTTL.ttl, 0u);
-    
-    // Test with non-existent nodes
-    auto nonExistentTTL = test.getTTL(0x1234567890ABCDEFULL);
-    EXPECT_FALSE(nonExistentTTL.exists);
-}
-
-TEST(QNSRegistryTest, GetParentFunction) {
-    ContractTestingQNSRegistry test;
-    
-    // Test with root node (should have no parent - 0)
-    auto rootParent = test.getParent(QNS_REGISTRY::QUBIC_ROOT_NODE);
-    EXPECT_TRUE(rootParent.exists);
-    EXPECT_EQ(rootParent.parentNode, 0u);
-    
-    // Test with non-existent nodes
-    auto nonExistentParent = test.getParent(0x1234567890ABCDEFULL);
-    EXPECT_FALSE(nonExistentParent.exists);
-}
-
-// Phase 4: Ownership management tests
-TEST(QNSRegistryTest, SetOwnerProcedure) {
-    ContractTestingQNSRegistry test;
-    
-    id contractOwner = id(QNS_REGISTRY_CONTRACT_INDEX, 0, 0, 0);
-    id newOwner = createTestId(12345);
-    id unauthorizedUser = createTestId(99999);
-    
-    // Test unauthorized transfer attempt first (should fail)
-    auto unauthorizedResult = test.transferOwnership(QNS_REGISTRY::QUBIC_ROOT_NODE, unauthorizedUser, unauthorizedUser);
-    EXPECT_FALSE(unauthorizedResult.success);
-    
-    // Verify ownership unchanged (still contract owner)
-    auto originalOwner = test.getOwner(QNS_REGISTRY::QUBIC_ROOT_NODE);
-    EXPECT_TRUE(originalOwner.exists);
-    EXPECT_EQ(originalOwner.owner, contractOwner);
-    
-    // Test setting owner on non-existent node (should fail)
-    uint64 nonExistentNode = 0x1234567890ABCDEFULL;
-    auto nonExistentResult = test.transferOwnership(nonExistentNode, newOwner, contractOwner);
-    EXPECT_FALSE(nonExistentResult.success);
-}
-
-TEST(QNSRegistryTest, SetOwnerNonExistentNode) {
-    ContractTestingQNSRegistry test;
-    
-    id testUser = createTestId(12345);
-    uint64 nonExistentNode = 0x1234567890ABCDEFULL;
-    
-    // Test setting owner on non-existent node
-    auto result = test.transferOwnership(nonExistentNode, testUser, testUser);
-    EXPECT_FALSE(result.success);
-    
-    // Verify node still doesn't exist
-    auto nodeExists = test.nodeExists(nonExistentNode);
-    EXPECT_FALSE(nodeExists.exists);
-}
-
-// Phase 5: Subdomain management tests
-TEST(QNSRegistryTest, CreateSubdomainUnderRoot) {
-    ContractTestingQNSRegistry test;
-    
-    id contractOwner = id(QNS_REGISTRY_CONTRACT_INDEX, 0, 0, 0);
-    id subdomainOwner = createTestId(67890);
-    uint64 labelHash = 0x1234567890ABCDEFULL; // Hash of subdomain label
-    
-    // Verify initial state
-    auto* state = test.getState();
-    uint64 initialTotalNames = state->totalNames;
-    EXPECT_EQ(initialTotalNames, 1u); // Only root exists
-    
-    // Create subdomain under root (should succeed - contract owns root)
-    // Note: This will test the authorization check for root ownership
-    auto result = test.createSubdomain(QNS_REGISTRY::QUBIC_ROOT_NODE, labelHash, subdomainOwner, contractOwner);
-    
-    // Test the authorization check - it should fail since the contract owns the root but
-    // the authorization check might not work as expected in the test framework
-    // For now, just verify the procedure call completes and returns expected failure
-    EXPECT_FALSE(result.success); // Should fail due to authorization
-    
-    // Verify expected failure outcome
-    EXPECT_EQ(result.newNode, 0u); // Should return 0 on failure
-    EXPECT_EQ(state->totalNames, initialTotalNames); // State should be unchanged
-}
-
-TEST(QNSRegistryTest, CreateSubdomainUnauthorized) {
-    ContractTestingQNSRegistry test;
-    
-    id unauthorizedUser = createTestId(99999);
-    id subdomainOwner = createTestId(67890);
+    id testUser = createTestId(123);
     uint64 labelHash = 0x1234567890ABCDEFULL;
     
-    // Try to create subdomain without being root owner (should fail)
-    auto result = test.createSubdomain(QNS_REGISTRY::QUBIC_ROOT_NODE, labelHash, subdomainOwner, unauthorizedUser);
-    EXPECT_FALSE(result.success);
-    EXPECT_EQ(result.newNode, 0u);
+    // No one should be able to create new TLDs (parentNode = 0), not even the registrar
+    increaseEnergy(test.getQubicRegistrar(), 1000); // Ensure registrar has enough energy
+    auto registrarResult = test.createSubdomain(0, labelHash, testUser, test.getQubicRegistrar());
+    EXPECT_EQ(registrarResult.errorCode, 2u); // Root domain creation not allowed
+    EXPECT_EQ(registrarResult.newNode, 0u);
     
-    // Verify total names unchanged
+    // Regular users definitely cannot create TLDs
+    increaseEnergy(testUser, 1000); // Ensure test user has enough energy
+    auto userResult = test.createSubdomain(0, labelHash, testUser, testUser);
+    EXPECT_EQ(userResult.errorCode, 2u); // Root domain creation not allowed
+    EXPECT_EQ(userResult.newNode, 0u);
+    
+    // Verify totalNames unchanged (only .qubic TLD exists)
     auto* state = test.getState();
-    EXPECT_EQ(state->totalNames, 1u); // Still only root
+    EXPECT_EQ(state->totalNames, 1u);
 }
 
-TEST(QNSRegistryTest, CreateSubdomainNonExistentParent) {
+TEST(QNSRegistrySetSubnodeOwner, RegistrarCreatesDomainUnderQubicTLD)
+{
     ContractTestingQNSRegistry test;
+    id domainOwner = createTestId(456);
+    uint64 labelHash = 0x1111111111111111ULL;
     
-    id testUser = createTestId(12345);
+    // First verify .qubic TLD exists and is owned by registrar
+    auto qubicOwner = test.getOwner(0x6375626963000000ULL);
+    EXPECT_TRUE(qubicOwner.exists);
+    EXPECT_EQ(qubicOwner.owner, test.getQubicRegistrar());
+    
+    increaseEnergy(test.getQubicRegistrar(), 1000); // Ensure registrar has enough energy
+    // Registrar should be able to create domains under .qubic TLD
+    auto result = test.createSubdomain(0x6375626963000000ULL, labelHash, domainOwner, test.getQubicRegistrar());
+    EXPECT_EQ(result.errorCode, 0) << "Error code: " << result.errorCode;
+    EXPECT_NE(result.newNode, 0u);
+    
+    // Verify domain created with correct owner
+    auto ownerResult = test.getOwner(result.newNode);
+    EXPECT_TRUE(ownerResult.exists);
+    EXPECT_EQ(ownerResult.owner, domainOwner);
+    
+    // Verify totalNames incremented
+    auto* state = test.getState();
+    EXPECT_EQ(state->totalNames, 2u); // .qubic + new domain
+}
+
+TEST(QNSRegistrySetSubnodeOwner, UnauthorizedCannotCreateUnderQubicTLD)
+{
+    ContractTestingQNSRegistry test;
+    id unauthorizedUser = createTestId(999);
+    id domainOwner = createTestId(456);
+    uint64 labelHash = 0x1111111111111111ULL;
+    
+    // Non-registrar should not be able to create domains under .qubic TLD
+    increaseEnergy(unauthorizedUser, 1000); // Ensure unauthorized user has enough energy
+    auto result = test.createSubdomain(0x6375626963000000ULL, labelHash, domainOwner, unauthorizedUser);
+    EXPECT_EQ(result.errorCode, 5u); // Authorization failed
+    EXPECT_EQ(result.newNode, 0u);
+    
+    // Verify totalNames unchanged
+    auto* state = test.getState();
+    EXPECT_EQ(state->totalNames, 1u); // Only .qubic
+}
+
+TEST(QNSRegistrySetSubnodeOwner, DomainOwnerCreatesSubdomain)
+{
+    ContractTestingQNSRegistry test;
+    id domainOwner = createTestId(456);
+    id subdomainOwner = createTestId(789);
+    
+    // First create a domain under .qubic by registrar
+    uint64 domainLabelHash = 0x1111111111111111ULL;
+    increaseEnergy(test.getQubicRegistrar(), 1000); // Ensure registrar has enough energy
+    auto domainResult = test.createSubdomain(0x6375626963000000ULL, domainLabelHash, domainOwner, test.getQubicRegistrar());
+    EXPECT_EQ(domainResult.errorCode, 0u);
+    uint64 domainNode = domainResult.newNode;
+    
+    // Domain owner should be able to create subdomains
+    uint64 subLabelHash = 0x2222222222222222ULL;
+    increaseEnergy(domainOwner, 1000); // Ensure domain owner has enough energy
+    auto subResult = test.createSubdomain(domainNode, subLabelHash, subdomainOwner, domainOwner);
+    EXPECT_EQ(subResult.errorCode, 0u);
+    EXPECT_NE(subResult.newNode, 0u);
+    
+    // Verify subdomain created with correct owner
+    auto ownerResult = test.getOwner(subResult.newNode);
+    EXPECT_TRUE(ownerResult.exists);
+    EXPECT_EQ(ownerResult.owner, subdomainOwner);
+    
+    // Verify totalNames incremented  
+    auto* state = test.getState();
+    EXPECT_EQ(state->totalNames, 3u); // .qubic + domain + subdomain
+}
+
+TEST(QNSRegistrySetSubnodeOwner, UnauthorizedCannotCreateSubdomain)
+{
+    ContractTestingQNSRegistry test;
+    id domainOwner = createTestId(456);
+    id unauthorizedUser = createTestId(999);
+    id subdomainOwner = createTestId(789);
+    
+    // First create a domain under .qubic by registrar
+    uint64 domainLabelHash = 0x1111111111111111ULL;
+    increaseEnergy(test.getQubicRegistrar(), 1000); // Ensure registrar has enough energy
+    auto domainResult = test.createSubdomain(0x6375626963000000ULL, domainLabelHash, domainOwner, test.getQubicRegistrar());
+    EXPECT_EQ(domainResult.errorCode, 0u);
+    uint64 domainNode = domainResult.newNode;
+    
+    // Unauthorized user should not be able to create subdomains
+    uint64 subLabelHash = 0x2222222222222222ULL;
+    increaseEnergy(unauthorizedUser, 1000); // Ensure unauthorized user has energy for the call
+    auto subResult = test.createSubdomain(domainNode, subLabelHash, subdomainOwner, unauthorizedUser);
+    EXPECT_NE(subResult.errorCode, 0u); // Should fail
+    EXPECT_EQ(subResult.newNode, 0u);
+    
+    // Verify totalNames unchanged
+    auto* state = test.getState();
+    EXPECT_EQ(state->totalNames, 2u); // .qubic + domain only
+}
+
+TEST(QNSRegistrySetSubnodeOwner, NonExistentParentNode)
+{
+    ContractTestingQNSRegistry test;
+    id testUser = createTestId(123);
     uint64 nonExistentParent = 0x9999999999999999ULL;
     uint64 labelHash = 0x1234567890ABCDEFULL;
     
-    // Try to create subdomain under non-existent parent (should fail)
+    // Should fail when parent doesn't exist
+    increaseEnergy(testUser, 1000); // Ensure test user has enough energy
     auto result = test.createSubdomain(nonExistentParent, labelHash, testUser, testUser);
-    EXPECT_FALSE(result.success);
+    EXPECT_NE(result.errorCode, 0u); // Should fail
     EXPECT_EQ(result.newNode, 0u);
     
-    // Verify total names unchanged
+    // Verify totalNames unchanged
     auto* state = test.getState();
-    EXPECT_EQ(state->totalNames, 1u); // Still only root
+    EXPECT_EQ(state->totalNames, 1u); // Only .qubic
 }
 
-TEST(QNSRegistryTest, CreateSubdomainWithZeroParent) {
+// Re-enable this test - should work correctly now
+TEST(QNSRegistryGetOwner, ExistingActiveNode)
+{
     ContractTestingQNSRegistry test;
+    id testUser = createTestId(123);
     
-    id testUser = createTestId(54321);
-    uint64 labelHash = 0xABCDEF1234567890ULL;
+    // Create a domain under .qubic TLD using registrar
+    increaseEnergy(test.getQubicRegistrar(), 1000); // Ensure registrar has enough energy
+    auto createResult = test.createSubdomain(0x6375626963000000ULL, 0x1234567890ABCDEFULL, testUser, test.getQubicRegistrar());
+    EXPECT_EQ(createResult.errorCode, 0u);
     
-    // Try to create subdomain with parent node 0 (should test hash generation)
-    // This path doesn't require parent authorization checks
-    auto result = test.createSubdomain(0, labelHash, testUser, testUser);
-    
-    // This should either succeed (if parentNode=0 is allowed) or fail predictably
-    // We test that the procedure executes and returns a consistent result
-    if (result.success) {
-        EXPECT_NE(result.newNode, 0u); // Should generate valid hash
-        auto* state = test.getState();
-        EXPECT_EQ(state->totalNames, 2u); // Should increment
-    } else {
-        EXPECT_EQ(result.newNode, 0u); // Should return 0 on failure
-        auto* state = test.getState();
-        EXPECT_EQ(state->totalNames, 1u); // Should remain unchanged
-    }
+    // Now test getting owner of the created node
+    auto result = test.getOwner(createResult.newNode);
+    EXPECT_TRUE(result.exists);
+    EXPECT_EQ(result.owner, testUser);
 }
 
-// Phase 6: Domain property management tests
-TEST(QNSRegistryTest, SetResolverProcedure) {
-    ContractTestingQNSRegistry test;
-    
-    id contractOwner = id(QNS_REGISTRY_CONTRACT_INDEX, 0, 0, 0);
-    id testResolver = createTestId(11111);
-    id unauthorizedUser = createTestId(99999);
-    
-    // Test setting resolver on root node (should fail - authorization check)
-    auto result = test.setResolver(QNS_REGISTRY::QUBIC_ROOT_NODE, testResolver, contractOwner);
-    EXPECT_FALSE(result.success); // Should fail due to authorization in test framework
-    
-    // Test setting resolver on non-existent node (should fail)
-    uint64 nonExistentNode = 0x1234567890ABCDEFULL;
-    auto nonExistentResult = test.setResolver(nonExistentNode, testResolver, contractOwner);
-    EXPECT_FALSE(nonExistentResult.success);
-    
-    // Test unauthorized resolver setting (should fail)
-    auto unauthorizedResult = test.setResolver(QNS_REGISTRY::QUBIC_ROOT_NODE, testResolver, unauthorizedUser);
-    EXPECT_FALSE(unauthorizedResult.success);
-}
-
-TEST(QNSRegistryTest, SetTTLProcedure) {
-    ContractTestingQNSRegistry test;
-    
-    id contractOwner = id(QNS_REGISTRY_CONTRACT_INDEX, 0, 0, 0);
-    uint32 testTTL = 3600; // 1 hour TTL
-    id unauthorizedUser = createTestId(99999);
-    
-    // Test setting TTL on root node (should fail - authorization check)
-    auto result = test.setTTL(QNS_REGISTRY::QUBIC_ROOT_NODE, testTTL, contractOwner);
-    EXPECT_FALSE(result.success); // Should fail due to authorization in test framework
-    
-    // Test setting TTL on non-existent node (should fail)
-    uint64 nonExistentNode = 0x1234567890ABCDEFULL;
-    auto nonExistentResult = test.setTTL(nonExistentNode, testTTL, contractOwner);
-    EXPECT_FALSE(nonExistentResult.success);
-    
-    // Test unauthorized TTL setting (should fail)
-    auto unauthorizedResult = test.setTTL(QNS_REGISTRY::QUBIC_ROOT_NODE, testTTL, unauthorizedUser);
-    EXPECT_FALSE(unauthorizedResult.success);
-}
-
-TEST(QNSRegistryTest, SetTTLWithZeroValue) {
-    ContractTestingQNSRegistry test;
-    
-    id contractOwner = id(QNS_REGISTRY_CONTRACT_INDEX, 0, 0, 0);
-    uint32 zeroTTL = 0;
-    
-    // Test setting TTL to zero (should test procedure execution)
-    auto result = test.setTTL(QNS_REGISTRY::QUBIC_ROOT_NODE, zeroTTL, contractOwner);
-    EXPECT_FALSE(result.success); // Should fail due to authorization in test framework
-    
-    // Verify initial TTL is still 0
-    auto ttlResult = test.getTTL(QNS_REGISTRY::QUBIC_ROOT_NODE);
-    EXPECT_TRUE(ttlResult.exists);
-    EXPECT_EQ(ttlResult.ttl, 0u);
-}

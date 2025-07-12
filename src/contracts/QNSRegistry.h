@@ -89,7 +89,7 @@ struct QNS_REGISTRY : public ContractBase
     };
     struct SetSubnodeOwner_output {
         uint64 newNode;
-        bit success;
+        uint32 errorCode; // 0 = success, >0 = specific error
     };
 
     struct SetTTL_input {
@@ -259,29 +259,36 @@ struct QNS_REGISTRY : public ContractBase
 
     PUBLIC_PROCEDURE_WITH_LOCALS(SetSubnodeOwner)
     {
-        output.success = false;
+        output.errorCode = 1; // Debug: verify procedure is called
         output.newNode = 0;
         
-        // Check if parent node exists (or is root)
-        if (input.parentNode != 0) {
-            if (!state.nameRegistry.contains(input.parentNode)) {
-                return;
-            }
-            
-            if (!state.nameRegistry.get(input.parentNode, locals.parentRecord) || !locals.parentRecord.isActive) {
-                return;
-            }
-            
-            // Check if caller is parent owner
-            if (!(qpi.invocator() == locals.parentRecord.owner)) {
-                return;
-            }
+        // cannot create root domain
+        if (input.parentNode == 0) {
+            output.errorCode = 2; // Parent node does not exist
+            return;
+        }
+        
+        // Check if parent node exists
+        if (!state.nameRegistry.contains(input.parentNode)) {
+            output.errorCode = 3; // Parent node does not exist
+            return;
+        }
+
+        if (!state.nameRegistry.get(input.parentNode, locals.parentRecord) || !locals.parentRecord.isActive) {
+            output.errorCode = 4; // Parent node inactive or get failed
+            return;
+        }
+        
+        // Check if caller is parent owner
+        if (!(qpi.invocator() == locals.parentRecord.owner)) {
+            output.errorCode = 5; // Authorization failed - not parent owner
+            return;
         }
         
         // Generate subnode hash (client provides parent and label hash, we combine them)
         locals.nodeData.parentNode = input.parentNode;
         locals.nodeData.labelHash = input.labelHash;
-        output.newNode = qpi.K12(locals.nodeData).m256i_u64[0];
+        output.newNode = qpi.K12(locals.nodeData).u64._0;
         
         // Check if subnode already exists
         if (state.nameRegistry.contains(output.newNode)) {
@@ -289,7 +296,7 @@ struct QNS_REGISTRY : public ContractBase
                 // Node already exists - transfer ownership only
                 locals.existingRecord.owner = input.owner;
                 state.nameRegistry.set(output.newNode, locals.existingRecord);
-                output.success = true;
+                output.errorCode = 0; // Success
                 return;
             }
         }
@@ -308,7 +315,7 @@ struct QNS_REGISTRY : public ContractBase
         // Increment total names
         state.totalNames++;
         
-        output.success = true;
+        output.errorCode = 0; // Success
     }
 
     PUBLIC_PROCEDURE_WITH_LOCALS(SetTTL)
@@ -350,8 +357,8 @@ struct QNS_REGISTRY : public ContractBase
         state.totalNames = 0;
         state.maxSubdomainDepth = 10;  // Maximum 10 levels of subdomains
         
-        // Create root .qubic node
-        locals.rootRecord.owner = SELF;  // Contract owns the root
+        // Create root .qubic node  
+        locals.rootRecord.owner = id(14, 0, 0, 0);  // Registrar owns the .qubic TLD
         locals.rootRecord.resolver = NULL_ID;
         locals.rootRecord.ttl = 0;
         locals.rootRecord.parentNode = 0;  // Root has no parent
