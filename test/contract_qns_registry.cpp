@@ -876,3 +876,68 @@ TEST(QNSRegistryInitialize, RegistryReset)
     EXPECT_TRUE(test.nodeExists(0x6375626963000000ULL).exists);
 }
 
+// =============================================================================
+// EPOCH PROCEDURES TESTS
+// =============================================================================
+
+TEST(QNSRegistryEpoch, BeginEpochDoesNotBreakState)
+{
+    ContractTestingQNSRegistry test;
+    
+    // Get initial state
+    uint64 initialTotalNames = test.getState()->totalNames;
+    auto initialRootExists = test.nodeExists(0x6375626963000000ULL);
+    auto initialRootOwner = test.getOwner(0x6375626963000000ULL);
+    
+    // Call BEGIN_EPOCH
+    test.beginEpoch();
+    
+    // Verify state unchanged - BEGIN_EPOCH is currently empty
+    EXPECT_EQ(test.getState()->totalNames, initialTotalNames);
+    EXPECT_EQ(test.nodeExists(0x6375626963000000ULL).exists, initialRootExists.exists);
+    EXPECT_EQ(test.getOwner(0x6375626963000000ULL).owner, initialRootOwner.owner);
+}
+
+TEST(QNSRegistryEpoch, EndEpochMaintainsStateConsistency)
+{
+    ContractTestingQNSRegistry test;
+    
+    // Get initial state
+    uint64 initialTotalNames = test.getState()->totalNames;
+    auto initialRootExists = test.nodeExists(0x6375626963000000ULL);
+    auto initialRootOwner = test.getOwner(0x6375626963000000ULL);
+    
+    // Call END_EPOCH (calls nameRegistry.cleanupIfNeeded())
+    test.endEpoch();
+    
+    // Verify state consistency maintained after cleanup
+    EXPECT_EQ(test.getState()->totalNames, initialTotalNames);
+    EXPECT_EQ(test.nodeExists(0x6375626963000000ULL).exists, initialRootExists.exists);
+    EXPECT_EQ(test.getOwner(0x6375626963000000ULL).owner, initialRootOwner.owner);
+}
+
+TEST(QNSRegistryEpoch, EpochProceduresSequence)
+{
+    ContractTestingQNSRegistry test;
+    
+    // Create a test subdomain first to have more state to verify
+    id testUser = createTestId(123);
+    increaseEnergy(test.getQubicRegistrar(), 1000);
+    auto createResult = test.createSubdomain(0x6375626963000000ULL, 0x746573740000000ULL, testUser, test.getQubicRegistrar());
+    EXPECT_EQ(createResult.errorCode, 0u);
+    
+    // Get state before epoch procedures
+    uint64 beforeTotalNames = test.getState()->totalNames;
+    auto beforeRootExists = test.nodeExists(0x6375626963000000ULL);
+    auto beforeSubdomainExists = test.nodeExists(createResult.newNode);
+    
+    // Run epoch sequence: BEGIN -> END
+    test.beginEpoch();
+    test.endEpoch();
+    
+    // Verify all state remains consistent
+    EXPECT_EQ(test.getState()->totalNames, beforeTotalNames);
+    EXPECT_EQ(test.nodeExists(0x6375626963000000ULL).exists, beforeRootExists.exists);
+    EXPECT_EQ(test.nodeExists(createResult.newNode).exists, beforeSubdomainExists.exists);
+}
+
