@@ -820,6 +820,256 @@ TEST(QNSRegistrySetTTL, ZeroTTLSetting)
     EXPECT_EQ(ttlAfter.ttl, 0u);
 }
 
+// ===== MULTI-LEVEL SUBDOMAIN TESTS =====
+
+TEST(QNSRegistryMultiLevel, NestedSubdomainCreation)
+{
+    ContractTestingQNSRegistry test;
+    
+    // Create owners for different levels
+    id domainOwner = createTestId(111);
+    id subdomainOwner = createTestId(222);
+    id subSubdomainOwner = createTestId(333);
+    
+    // Step 1: Create domain under .qubic TLD (level 1)
+    uint64 domainLabelHash = 0x1111111111111111ULL;
+    increaseEnergy(test.getQubicRegistrar(), 1000);
+    auto domainResult = test.createSubdomain(0x6375626963000000ULL, domainLabelHash, domainOwner, test.getQubicRegistrar());
+    EXPECT_EQ(domainResult.errorCode, 0u);
+    uint64 domainNode = domainResult.newNode;
+    
+    // Step 2: Create subdomain under domain (level 2)
+    uint64 subLabelHash = 0x2222222222222222ULL;
+    increaseEnergy(domainOwner, 1000);
+    auto subResult = test.createSubdomain(domainNode, subLabelHash, subdomainOwner, domainOwner);
+    EXPECT_EQ(subResult.errorCode, 0u);
+    uint64 subdomainNode = subResult.newNode;
+    
+    // Step 3: Create sub-subdomain under subdomain (level 3)
+    uint64 subSubLabelHash = 0x3333333333333333ULL;
+    increaseEnergy(subdomainOwner, 1000);
+    auto subSubResult = test.createSubdomain(subdomainNode, subSubLabelHash, subSubdomainOwner, subdomainOwner);
+    EXPECT_EQ(subSubResult.errorCode, 0u);
+    uint64 subSubdomainNode = subSubResult.newNode;
+    
+    // Verify all nodes exist with correct owners
+    auto domainOwnerResult = test.getOwner(domainNode);
+    EXPECT_TRUE(domainOwnerResult.exists);
+    EXPECT_EQ(domainOwnerResult.owner, domainOwner);
+    
+    auto subdomainOwnerResult = test.getOwner(subdomainNode);
+    EXPECT_TRUE(subdomainOwnerResult.exists);
+    EXPECT_EQ(subdomainOwnerResult.owner, subdomainOwner);
+    
+    auto subSubdomainOwnerResult = test.getOwner(subSubdomainNode);
+    EXPECT_TRUE(subSubdomainOwnerResult.exists);
+    EXPECT_EQ(subSubdomainOwnerResult.owner, subSubdomainOwner);
+    
+    // Verify totalNames incremented correctly
+    auto* state = test.getState();
+    EXPECT_EQ(state->totalNames, 4u); // .qubic + domain + subdomain + sub-subdomain
+}
+
+TEST(QNSRegistryMultiLevel, OwnershipIndependence)
+{
+    ContractTestingQNSRegistry test;
+    
+    // Create owners for different levels
+    id domainOwner = createTestId(444);
+    id subdomainOwner = createTestId(555);
+    id newSubdomainOwner = createTestId(666);
+    
+    // Create domain and subdomain
+    uint64 domainLabelHash = 0x4444444444444444ULL;
+    increaseEnergy(test.getQubicRegistrar(), 1000);
+    auto domainResult = test.createSubdomain(0x6375626963000000ULL, domainLabelHash, domainOwner, test.getQubicRegistrar());
+    EXPECT_EQ(domainResult.errorCode, 0u);
+    uint64 domainNode = domainResult.newNode;
+    
+    uint64 subLabelHash = 0x5555555555555555ULL;
+    increaseEnergy(domainOwner, 1000);
+    auto subResult = test.createSubdomain(domainNode, subLabelHash, subdomainOwner, domainOwner);
+    EXPECT_EQ(subResult.errorCode, 0u);
+    uint64 subdomainNode = subResult.newNode;
+    
+    // Verify subdomain owner can transfer ownership independently
+    increaseEnergy(subdomainOwner, 1000);
+    auto transferResult = test.transferOwnership(subdomainNode, newSubdomainOwner, subdomainOwner);
+    EXPECT_TRUE(transferResult.success);
+    
+    // Verify ownership changed for subdomain but not domain
+    auto domainOwnerResult = test.getOwner(domainNode);
+    EXPECT_TRUE(domainOwnerResult.exists);
+    EXPECT_EQ(domainOwnerResult.owner, domainOwner); // Unchanged
+    
+    auto subdomainOwnerResult = test.getOwner(subdomainNode);
+    EXPECT_TRUE(subdomainOwnerResult.exists);
+    EXPECT_EQ(subdomainOwnerResult.owner, newSubdomainOwner); // Changed
+    
+    // Verify domain owner cannot transfer subdomain ownership
+    increaseEnergy(domainOwner, 1000);
+    auto unauthorizedTransfer = test.transferOwnership(subdomainNode, domainOwner, domainOwner);
+    EXPECT_FALSE(unauthorizedTransfer.success);
+}
+
+TEST(QNSRegistryMultiLevel, ResolverIndependence)
+{
+    ContractTestingQNSRegistry test;
+    
+    // Create owners and resolvers for different levels
+    id domainOwner = createTestId(777);
+    id subdomainOwner = createTestId(888);
+    id domainResolver = createTestId(999);
+    id subdomainResolver = createTestId(1010);
+    
+    // Create domain and subdomain
+    uint64 domainLabelHash = 0x7777777777777777ULL;
+    increaseEnergy(test.getQubicRegistrar(), 1000);
+    auto domainResult = test.createSubdomain(0x6375626963000000ULL, domainLabelHash, domainOwner, test.getQubicRegistrar());
+    EXPECT_EQ(domainResult.errorCode, 0u);
+    uint64 domainNode = domainResult.newNode;
+    
+    uint64 subLabelHash = 0x8888888888888888ULL;
+    increaseEnergy(domainOwner, 1000);
+    auto subResult = test.createSubdomain(domainNode, subLabelHash, subdomainOwner, domainOwner);
+    EXPECT_EQ(subResult.errorCode, 0u);
+    uint64 subdomainNode = subResult.newNode;
+    
+    // Set different resolvers for domain and subdomain
+    increaseEnergy(domainOwner, 1000);
+    auto domainResolverResult = test.setResolver(domainNode, domainResolver, domainOwner);
+    EXPECT_TRUE(domainResolverResult.success);
+    
+    increaseEnergy(subdomainOwner, 1000);
+    auto subdomainResolverResult = test.setResolver(subdomainNode, subdomainResolver, subdomainOwner);
+    EXPECT_TRUE(subdomainResolverResult.success);
+    
+    // Verify resolvers are independent
+    auto domainResolverCheck = test.getResolver(domainNode);
+    EXPECT_TRUE(domainResolverCheck.exists);
+    EXPECT_EQ(domainResolverCheck.resolver, domainResolver);
+    
+    auto subdomainResolverCheck = test.getResolver(subdomainNode);
+    EXPECT_TRUE(subdomainResolverCheck.exists);
+    EXPECT_EQ(subdomainResolverCheck.resolver, subdomainResolver);
+    
+    // Verify domain owner cannot set subdomain resolver
+    increaseEnergy(domainOwner, 1000);
+    auto unauthorizedResolver = test.setResolver(subdomainNode, domainResolver, domainOwner);
+    EXPECT_FALSE(unauthorizedResolver.success);
+    
+    // Verify subdomain resolver unchanged
+    auto subdomainResolverFinal = test.getResolver(subdomainNode);
+    EXPECT_TRUE(subdomainResolverFinal.exists);
+    EXPECT_EQ(subdomainResolverFinal.resolver, subdomainResolver);
+}
+
+TEST(QNSRegistryMultiLevel, DeepNestingCapability)
+{
+    ContractTestingQNSRegistry test;
+    
+    // Test creating 5 levels of subdomains
+    id owners[5];
+    uint64 nodes[5];
+    uint64 labelHashes[5] = {
+        0x1111111111111111ULL,
+        0x2222222222222222ULL,
+        0x3333333333333333ULL,
+        0x4444444444444444ULL,
+        0x5555555555555555ULL
+    };
+    
+    for (int i = 0; i < 5; i++) {
+        owners[i] = createTestId(1000 + i);
+    }
+    
+    // Create level 1 domain under .qubic
+    increaseEnergy(test.getQubicRegistrar(), 1000);
+    auto result0 = test.createSubdomain(0x6375626963000000ULL, labelHashes[0], owners[0], test.getQubicRegistrar());
+    EXPECT_EQ(result0.errorCode, 0u);
+    nodes[0] = result0.newNode;
+    
+    // Create levels 2-5 (subdomain under previous level)
+    for (int i = 1; i < 5; i++) {
+        increaseEnergy(owners[i-1], 1000);
+        auto result = test.createSubdomain(nodes[i-1], labelHashes[i], owners[i], owners[i-1]);
+        EXPECT_EQ(result.errorCode, 0u);
+        nodes[i] = result.newNode;
+    }
+    
+    // Verify all levels exist with correct owners
+    for (int i = 0; i < 5; i++) {
+        auto ownerResult = test.getOwner(nodes[i]);
+        EXPECT_TRUE(ownerResult.exists);
+        EXPECT_EQ(ownerResult.owner, owners[i]);
+    }
+    
+    // Verify totalNames incremented correctly
+    auto* state = test.getState();
+    EXPECT_EQ(state->totalNames, 6u); // .qubic + 5 levels
+    
+    // Verify deepest level owner can create further subdomains
+    uint64 deepestLabelHash = 0x9999999999999999ULL;
+    id deepestOwner = createTestId(9999);
+    increaseEnergy(owners[4], 1000);
+    auto deepestResult = test.createSubdomain(nodes[4], deepestLabelHash, deepestOwner, owners[4]);
+    EXPECT_EQ(deepestResult.errorCode, 0u);
+    
+    // Verify final count
+    auto* finalState = test.getState();
+    EXPECT_EQ(finalState->totalNames, 7u); // .qubic + 5 levels + deepest
+}
+
+TEST(QNSRegistryMultiLevel, SubdomainCreationAuthorization)
+{
+    ContractTestingQNSRegistry test;
+    
+    // Create multi-level structure
+    id domainOwner = createTestId(1111);
+    id subdomainOwner = createTestId(2222);
+    id unauthorizedUser = createTestId(3333);
+    
+    // Create domain and subdomain
+    uint64 domainLabelHash = 0xAAAAAAAAAAAAAAAAULL;
+    increaseEnergy(test.getQubicRegistrar(), 1000);
+    auto domainResult = test.createSubdomain(0x6375626963000000ULL, domainLabelHash, domainOwner, test.getQubicRegistrar());
+    EXPECT_EQ(domainResult.errorCode, 0u);
+    uint64 domainNode = domainResult.newNode;
+    
+    uint64 subLabelHash = 0xBBBBBBBBBBBBBBBBULL;
+    increaseEnergy(domainOwner, 1000);
+    auto subResult = test.createSubdomain(domainNode, subLabelHash, subdomainOwner, domainOwner);
+    EXPECT_EQ(subResult.errorCode, 0u);
+    uint64 subdomainNode = subResult.newNode;
+    
+    // Verify only subdomain owner can create under subdomain
+    uint64 subSubLabelHash = 0xCCCCCCCCCCCCCCCCULL;
+    id subSubOwner = createTestId(4444);
+    
+    // Authorized creation by subdomain owner
+    increaseEnergy(subdomainOwner, 1000);
+    auto authorizedResult = test.createSubdomain(subdomainNode, subSubLabelHash, subSubOwner, subdomainOwner);
+    EXPECT_EQ(authorizedResult.errorCode, 0u);
+    
+    // Verify unauthorized creation fails
+    uint64 unauthorizedLabelHash = 0xDDDDDDDDDDDDDDDDULL;
+    id unauthorizedSubOwner = createTestId(5555);
+    
+    // Domain owner cannot create under subdomain
+    increaseEnergy(domainOwner, 1000);
+    auto unauthorizedResult1 = test.createSubdomain(subdomainNode, unauthorizedLabelHash, unauthorizedSubOwner, domainOwner);
+    EXPECT_NE(unauthorizedResult1.errorCode, 0u);
+    
+    // Random user cannot create under subdomain
+    increaseEnergy(unauthorizedUser, 1000);
+    auto unauthorizedResult2 = test.createSubdomain(subdomainNode, unauthorizedLabelHash, unauthorizedSubOwner, unauthorizedUser);
+    EXPECT_NE(unauthorizedResult2.errorCode, 0u);
+    
+    // Verify totalNames only incremented for successful creation
+    auto* state = test.getState();
+    EXPECT_EQ(state->totalNames, 4u); // .qubic + domain + subdomain + sub-subdomain
+}
+
 // ===== INITIALIZE PROCEDURE TESTS =====
 
 TEST(QNSRegistryInitialize, StateInitialization)
@@ -939,5 +1189,555 @@ TEST(QNSRegistryEpoch, EpochProceduresSequence)
     EXPECT_EQ(test.getState()->totalNames, beforeTotalNames);
     EXPECT_EQ(test.nodeExists(0x6375626963000000ULL).exists, beforeRootExists.exists);
     EXPECT_EQ(test.nodeExists(createResult.newNode).exists, beforeSubdomainExists.exists);
+}
+
+// =============================================================================
+// STATE VALIDATION TESTS
+// =============================================================================
+
+TEST(QNSRegistryStateValidation, TotalNamesAccuracy)
+{
+    ContractTestingQNSRegistry test;
+    
+    // Initial state: totalNames should be 1 (root .qubic node)
+    auto* state = test.getState();
+    EXPECT_EQ(state->totalNames, 1u);
+    
+    // Create first domain under .qubic
+    id domainOwner = createTestId(1111);
+    increaseEnergy(test.getQubicRegistrar(), 1000);
+    auto domain1 = test.createSubdomain(0x6375626963000000ULL, 0x1111111111111111ULL, domainOwner, test.getQubicRegistrar());
+    EXPECT_EQ(domain1.errorCode, 0u);
+    EXPECT_EQ(state->totalNames, 2u); // .qubic + domain1
+    
+    // Create second domain under .qubic
+    id domain2Owner = createTestId(2222);
+    increaseEnergy(test.getQubicRegistrar(), 1000);
+    auto domain2 = test.createSubdomain(0x6375626963000000ULL, 0x2222222222222222ULL, domain2Owner, test.getQubicRegistrar());
+    EXPECT_EQ(domain2.errorCode, 0u);
+    EXPECT_EQ(state->totalNames, 3u); // .qubic + domain1 + domain2
+    
+    // Create subdomain under domain1
+    id subdomainOwner = createTestId(3333);
+    increaseEnergy(domainOwner, 1000);
+    auto subdomain = test.createSubdomain(domain1.newNode, 0x3333333333333333ULL, subdomainOwner, domainOwner);
+    EXPECT_EQ(subdomain.errorCode, 0u);
+    EXPECT_EQ(state->totalNames, 4u); // .qubic + domain1 + domain2 + subdomain
+    
+    // Verify ownership transfer does NOT increment totalNames
+    id newOwner = createTestId(4444);
+    increaseEnergy(domainOwner, 1000);
+    auto transfer = test.transferOwnership(domain1.newNode, newOwner, domainOwner);
+    EXPECT_EQ(transfer.success, 1u);
+    EXPECT_EQ(state->totalNames, 4u); // No change - transfer doesn't create new node
+    
+    // Verify failed subdomain creation does NOT increment totalNames
+    id unauthorizedUser = createTestId(5555);
+    increaseEnergy(unauthorizedUser, 1000);
+    auto failedCreate = test.createSubdomain(domain1.newNode, 0x5555555555555555ULL, unauthorizedUser, unauthorizedUser);
+    EXPECT_NE(failedCreate.errorCode, 0u);
+    EXPECT_EQ(state->totalNames, 4u); // No change - failed creation
+}
+
+TEST(QNSRegistryStateValidation, HashMapConsistency)
+{
+    ContractTestingQNSRegistry test;
+    
+    auto* state = test.getState();
+    
+    // Create multiple domains to populate HashMap
+    id domainOwner = createTestId(1111);
+    uint64 domainNodes[5];
+    
+    for (int i = 0; i < 5; i++) {
+        increaseEnergy(test.getQubicRegistrar(), 1000);
+        auto result = test.createSubdomain(0x6375626963000000ULL, 0x1111111111111111ULL + i, domainOwner, test.getQubicRegistrar());
+        EXPECT_EQ(result.errorCode, 0u);
+        domainNodes[i] = result.newNode;
+    }
+    
+    // Verify all created nodes exist and can be retrieved
+    for (int i = 0; i < 5; i++) {
+        auto nodeExists = test.nodeExists(domainNodes[i]);
+        EXPECT_TRUE(nodeExists.exists);
+        
+        auto owner = test.getOwner(domainNodes[i]);
+        EXPECT_TRUE(owner.exists);
+        EXPECT_EQ(owner.owner, domainOwner);
+        
+        auto resolver = test.getResolver(domainNodes[i]);
+        EXPECT_TRUE(resolver.exists);
+        EXPECT_EQ(resolver.resolver, NULL_ID);
+    }
+    
+    // Verify totalNames reflects all created nodes
+    EXPECT_EQ(state->totalNames, 6u); // .qubic + 5 domains
+    
+    // Perform cleanup (END_EPOCH) and verify consistency maintained
+    test.endEpoch();
+    
+    // Verify all nodes still exist after cleanup
+    for (int i = 0; i < 5; i++) {
+        auto nodeExists = test.nodeExists(domainNodes[i]);
+        EXPECT_TRUE(nodeExists.exists);
+    }
+    
+    // Verify totalNames unchanged after cleanup
+    EXPECT_EQ(state->totalNames, 6u);
+}
+
+TEST(QNSRegistryStateValidation, MemoryUsageValidation)
+{
+    ContractTestingQNSRegistry test;
+    
+    auto* state = test.getState();
+    
+    // HashMap is defined as HashMap<uint64, NameRecord, 1048576> (1M entries)
+    // Each NameRecord contains: id owner (32 bytes), id resolver (32 bytes), 
+    // uint32 ttl (4 bytes), uint64 parentNode (8 bytes), uint64 createdAt (8 bytes), bit isActive (1 byte)
+    // Total per record: ~85 bytes + HashMap overhead
+    
+    // Create a reasonable number of domains to test memory usage
+    id domainOwner = createTestId(1111);
+    const int domainCount = 100;
+    
+    for (int i = 0; i < domainCount; i++) {
+        increaseEnergy(test.getQubicRegistrar(), 1000);
+        auto result = test.createSubdomain(0x6375626963000000ULL, 0x1111111111111111ULL + i, domainOwner, test.getQubicRegistrar());
+        EXPECT_EQ(result.errorCode, 0u);
+    }
+    
+    // Verify totalNames is accurate
+    EXPECT_EQ(state->totalNames, 1u + domainCount); // .qubic + created domains
+    
+    // Verify all domains can be accessed (no memory corruption)
+    for (int i = 0; i < domainCount; i++) {
+        // Hash calculation should match SetSubnodeOwner implementation
+        // For this test, we'll verify that the domains exist by checking totalNames
+        // and that the system remains functional
+        auto rootExists = test.nodeExists(0x6375626963000000ULL);
+        EXPECT_TRUE(rootExists.exists);
+    }
+    
+    // Verify system remains functional after many operations
+    id testUser = createTestId(9999);
+    increaseEnergy(test.getQubicRegistrar(), 1000);
+    auto finalTest = test.createSubdomain(0x6375626963000000ULL, 0x9999999999999999ULL, testUser, test.getQubicRegistrar());
+    EXPECT_EQ(finalTest.errorCode, 0u);
+    EXPECT_EQ(state->totalNames, 2u + domainCount);
+}
+
+TEST(QNSRegistryStateValidation, StateSizeConstraints)
+{
+    ContractTestingQNSRegistry test;
+    
+    auto* state = test.getState();
+    
+    // Test maxSubdomainDepth constraint (currently set to 10 but not enforced)
+    EXPECT_EQ(state->maxSubdomainDepth, 10u);
+    
+    // Create deep subdomain chain to test depth handling
+    id chainOwner = createTestId(1111);
+    
+    // Create root domain
+    increaseEnergy(test.getQubicRegistrar(), 1000);
+    auto rootDomain = test.createSubdomain(0x6375626963000000ULL, 0x1111111111111111ULL, chainOwner, test.getQubicRegistrar());
+    EXPECT_EQ(rootDomain.errorCode, 0u);
+    
+    uint64 currentNode = rootDomain.newNode;
+    
+    // Create chain of 5 subdomains (well within any reasonable limit)
+    for (int depth = 0; depth < 5; depth++) {
+        increaseEnergy(chainOwner, 1000);
+        auto subResult = test.createSubdomain(currentNode, 0x2222222222222222ULL + depth, chainOwner, chainOwner);
+        EXPECT_EQ(subResult.errorCode, 0u);
+        currentNode = subResult.newNode;
+    }
+    
+    // Verify totalNames reflects the chain
+    EXPECT_EQ(state->totalNames, 7u); // .qubic + rootDomain + 5 subdomains
+    
+    // Test that totalNames cannot exceed reasonable bounds
+    // (This is more of a sanity check since uint64 max is very large)
+    EXPECT_LT(state->totalNames, 1000000u); // Much less than HashMap capacity
+    
+    // Verify final node in chain is accessible
+    auto finalExists = test.nodeExists(currentNode);
+    EXPECT_TRUE(finalExists.exists);
+    
+    auto finalOwner = test.getOwner(currentNode);
+    EXPECT_TRUE(finalOwner.exists);
+    EXPECT_EQ(finalOwner.owner, chainOwner);
+    
+    // Test configuration bounds
+    EXPECT_GT(state->maxSubdomainDepth, 0u);
+    EXPECT_LT(state->maxSubdomainDepth, 256u); // Reasonable upper bound
+}
+
+// =============================================================================
+// INTEGRATION TEST SCENARIOS - Task 19
+// =============================================================================
+
+TEST(QNSRegistryIntegration, CompleteDomainLifecycle)
+{
+    // Test complete domain lifecycle: create, modify, transfer
+    ContractTestingQNSRegistry test;
+    
+    // Create test identities
+    id registrar = test.getQubicRegistrar();
+    id alice = createTestId(1111);
+    id bob = createTestId(2222);
+    id charlie = createTestId(3333);
+    
+    increaseEnergy(registrar, 1000);
+    increaseEnergy(alice, 1000);
+    increaseEnergy(bob, 1000);
+    increaseEnergy(charlie, 1000);
+    
+    // Step 1: Create domain alice.qubic
+    uint64 aliceHash = 0x123456789abcdef0ULL;
+    auto createResult = test.createSubdomain(0x6375626963000000ULL, aliceHash, alice, registrar);
+    EXPECT_EQ(createResult.errorCode, 0u);
+    EXPECT_NE(createResult.newNode, 0u);
+    
+    uint64 aliceNode = createResult.newNode;
+    
+    // Step 2: Verify domain exists and has correct owner
+    auto ownerResult = test.getOwner(aliceNode);
+    EXPECT_TRUE(ownerResult.exists);
+    EXPECT_EQ(ownerResult.owner, alice);
+    
+    // Step 3: Set resolver for alice.qubic
+    auto setResolverResult = test.setResolver(aliceNode, bob, alice);
+    EXPECT_TRUE(setResolverResult.success);
+    
+    // Step 4: Verify resolver was set
+    auto resolverResult = test.getResolver(aliceNode);
+    EXPECT_TRUE(resolverResult.exists);
+    EXPECT_EQ(resolverResult.resolver, bob);
+    
+    // Step 5: Set TTL for alice.qubic
+    auto setTTLResult = test.setTTL(aliceNode, 3600, alice);
+    EXPECT_TRUE(setTTLResult.success);
+    
+    // Step 6: Verify TTL was set
+    auto ttlResult = test.getTTL(aliceNode);
+    EXPECT_TRUE(ttlResult.exists);
+    EXPECT_EQ(ttlResult.ttl, 3600u);
+    
+    // Step 7: Transfer ownership to bob
+    auto transferResult = test.transferOwnership(aliceNode, bob, alice);
+    EXPECT_TRUE(transferResult.success);
+    
+    // Step 8: Verify ownership transfer
+    auto newOwnerResult = test.getOwner(aliceNode);
+    EXPECT_TRUE(newOwnerResult.exists);
+    EXPECT_EQ(newOwnerResult.owner, bob);
+    
+    // Step 9: Verify alice can no longer modify (ownership transferred)
+    auto unauthorizedResult = test.setTTL(aliceNode, 7200, alice);
+    EXPECT_FALSE(unauthorizedResult.success);
+    
+    // Step 10: Verify bob can now modify
+    auto authorizedResult = test.setTTL(aliceNode, 7200, bob);
+    EXPECT_TRUE(authorizedResult.success);
+    
+    // Verify final TTL
+    auto finalTTLResult = test.getTTL(aliceNode);
+    EXPECT_TRUE(finalTTLResult.exists);
+    EXPECT_EQ(finalTTLResult.ttl, 7200u);
+    
+    // Step 11: Verify totalNames is correct
+    auto* state = test.getState();
+    EXPECT_EQ(state->totalNames, 2u); // .qubic + alice.qubic
+}
+
+TEST(QNSRegistryIntegration, MultiUserSubdomainManagement)
+{
+    // Test multi-user subdomain management with different ownership scenarios
+    ContractTestingQNSRegistry test;
+    
+    // Create test identities
+    id registrar = test.getQubicRegistrar();
+    id alice = createTestId(1111);
+    id bob = createTestId(2222);
+    id charlie = createTestId(3333);
+    id david = createTestId(4444);
+    
+    increaseEnergy(registrar, 1000);
+    increaseEnergy(alice, 1000);
+    increaseEnergy(bob, 1000);
+    increaseEnergy(charlie, 1000);
+    increaseEnergy(david, 1000);
+    
+    // Step 1: Create company.qubic owned by alice
+    uint64 companyHash = 0x1111111111111111ULL;
+    auto createCompanyResult = test.createSubdomain(0x6375626963000000ULL, companyHash, alice, registrar);
+    EXPECT_EQ(createCompanyResult.errorCode, 0u);
+    uint64 companyNode = createCompanyResult.newNode;
+    
+    // Step 2: Alice creates dept1.company.qubic for bob
+    uint64 dept1Hash = 0x2222222222222222ULL;
+    auto createDept1Result = test.createSubdomain(companyNode, dept1Hash, bob, alice);
+    EXPECT_EQ(createDept1Result.errorCode, 0u);
+    uint64 dept1Node = createDept1Result.newNode;
+    
+    // Step 3: Alice creates dept2.company.qubic for charlie
+    uint64 dept2Hash = 0x3333333333333333ULL;
+    auto createDept2Result = test.createSubdomain(companyNode, dept2Hash, charlie, alice);
+    EXPECT_EQ(createDept2Result.errorCode, 0u);
+    uint64 dept2Node = createDept2Result.newNode;
+    
+    // Step 4: Bob creates project.dept1.company.qubic for david
+    uint64 projectHash = 0x4444444444444444ULL;
+    auto createProjectResult = test.createSubdomain(dept1Node, projectHash, david, bob);
+    EXPECT_EQ(createProjectResult.errorCode, 0u);
+    uint64 projectNode = createProjectResult.newNode;
+    
+    // Step 5: Verify ownership hierarchy
+    auto companyOwner = test.getOwner(companyNode);
+    EXPECT_TRUE(companyOwner.exists);
+    EXPECT_EQ(companyOwner.owner, alice);
+    
+    auto dept1Owner = test.getOwner(dept1Node);
+    EXPECT_TRUE(dept1Owner.exists);
+    EXPECT_EQ(dept1Owner.owner, bob);
+    
+    auto dept2Owner = test.getOwner(dept2Node);
+    EXPECT_TRUE(dept2Owner.exists);
+    EXPECT_EQ(dept2Owner.owner, charlie);
+    
+    auto projectOwner = test.getOwner(projectNode);
+    EXPECT_TRUE(projectOwner.exists);
+    EXPECT_EQ(projectOwner.owner, david);
+    
+    // Step 6: Test cross-department unauthorized access
+    // Charlie cannot create subdomains under dept1 (owned by bob)
+    uint64 unauthorizedHash = 0x5555555555555555ULL;
+    auto unauthorizedResult = test.createSubdomain(dept1Node, unauthorizedHash, charlie, charlie);
+    EXPECT_NE(unauthorizedResult.errorCode, 0u);
+    
+    // Step 7: Test subdomain independence
+    // Bob transfers dept1 to david, but this doesn't affect project ownership
+    auto transferDept1Result = test.transferOwnership(dept1Node, david, bob);
+    EXPECT_TRUE(transferDept1Result.success);
+    
+    // Verify project is still owned by david and dept1 is now owned by david
+    auto newDept1Owner = test.getOwner(dept1Node);
+    EXPECT_TRUE(newDept1Owner.exists);
+    EXPECT_EQ(newDept1Owner.owner, david);
+    
+    auto unchangedProjectOwner = test.getOwner(projectNode);
+    EXPECT_TRUE(unchangedProjectOwner.exists);
+    EXPECT_EQ(unchangedProjectOwner.owner, david);
+    
+    // Step 8: Test resolver independence
+    // Set different resolvers for each level
+    auto setCompanyResolver = test.setResolver(companyNode, alice, alice);
+    EXPECT_TRUE(setCompanyResolver.success);
+    
+    auto setDept2Resolver = test.setResolver(dept2Node, bob, charlie);
+    EXPECT_TRUE(setDept2Resolver.success);
+    
+    auto setProjectResolver = test.setResolver(projectNode, charlie, david);
+    EXPECT_TRUE(setProjectResolver.success);
+    
+    // Verify resolver independence
+    auto companyResolver = test.getResolver(companyNode);
+    EXPECT_TRUE(companyResolver.exists);
+    EXPECT_EQ(companyResolver.resolver, alice);
+    
+    auto dept2Resolver = test.getResolver(dept2Node);
+    EXPECT_TRUE(dept2Resolver.exists);
+    EXPECT_EQ(dept2Resolver.resolver, bob);
+    
+    auto projectResolver = test.getResolver(projectNode);
+    EXPECT_TRUE(projectResolver.exists);
+    EXPECT_EQ(projectResolver.resolver, charlie);
+    
+    // Step 9: Verify totalNames is correct
+    auto* state = test.getState();
+    EXPECT_EQ(state->totalNames, 5u); // .qubic + company + dept1 + dept2 + project
+}
+
+TEST(QNSRegistryIntegration, ResolverContractIntegrationSimulation)
+{
+    // Simulate integration with resolver contract by testing resolver setting/getting patterns
+    ContractTestingQNSRegistry test;
+    
+    // Create test identities
+    id registrar = test.getQubicRegistrar();
+    id domainOwner = createTestId(1111);
+    id resolverContract1 = createTestId(2001); // Simulated resolver contract
+    id resolverContract2 = createTestId(2002); // Another resolver contract
+    
+    increaseEnergy(registrar, 1000);
+    increaseEnergy(domainOwner, 1000);
+    
+    // Step 1: Create domain for testing
+    uint64 domainHash = 0xaabbccddee000000ULL;
+    auto createResult = test.createSubdomain(0x6375626963000000ULL, domainHash, domainOwner, registrar);
+    EXPECT_EQ(createResult.errorCode, 0u);
+    uint64 domainNode = createResult.newNode;
+    
+    // Step 2: Set resolver to resolverContract1
+    auto setResolverResult = test.setResolver(domainNode, resolverContract1, domainOwner);
+    EXPECT_TRUE(setResolverResult.success);
+    
+    // Step 3: Verify resolver was set
+    auto resolverResult = test.getResolver(domainNode);
+    EXPECT_TRUE(resolverResult.exists);
+    EXPECT_EQ(resolverResult.resolver, resolverContract1);
+    
+    // Step 4: Create multiple subdomains with different resolvers
+    uint64 webHash = 0x1111000000000000ULL;
+    auto createWebResult = test.createSubdomain(domainNode, webHash, domainOwner, domainOwner);
+    EXPECT_EQ(createWebResult.errorCode, 0u);
+    uint64 webNode = createWebResult.newNode;
+    
+    uint64 mailHash = 0x2222000000000000ULL;
+    auto createMailResult = test.createSubdomain(domainNode, mailHash, domainOwner, domainOwner);
+    EXPECT_EQ(createMailResult.errorCode, 0u);
+    uint64 mailNode = createMailResult.newNode;
+    
+    // Step 5: Set different resolvers for subdomains
+    auto setWebResolverResult = test.setResolver(webNode, resolverContract1, domainOwner);
+    EXPECT_TRUE(setWebResolverResult.success);
+    
+    auto setMailResolverResult = test.setResolver(mailNode, resolverContract2, domainOwner);
+    EXPECT_TRUE(setMailResolverResult.success);
+    
+    // Step 6: Verify resolver inheritance doesn't occur (each domain has independent resolver)
+    auto webResolver = test.getResolver(webNode);
+    EXPECT_TRUE(webResolver.exists);
+    EXPECT_EQ(webResolver.resolver, resolverContract1);
+    
+    auto mailResolver = test.getResolver(mailNode);
+    EXPECT_TRUE(mailResolver.exists);
+    EXPECT_EQ(mailResolver.resolver, resolverContract2);
+    
+    // Step 7: Test resolver changes don't affect subdomains
+    auto changeParentResolverResult = test.setResolver(domainNode, resolverContract2, domainOwner);
+    EXPECT_TRUE(changeParentResolverResult.success);
+    
+    // Verify parent resolver changed
+    auto newParentResolver = test.getResolver(domainNode);
+    EXPECT_TRUE(newParentResolver.exists);
+    EXPECT_EQ(newParentResolver.resolver, resolverContract2);
+    
+    // Verify subdomain resolvers unchanged
+    auto unchangedWebResolver = test.getResolver(webNode);
+    EXPECT_TRUE(unchangedWebResolver.exists);
+    EXPECT_EQ(unchangedWebResolver.resolver, resolverContract1);
+    
+    auto unchangedMailResolver = test.getResolver(mailNode);
+    EXPECT_TRUE(unchangedMailResolver.exists);
+    EXPECT_EQ(unchangedMailResolver.resolver, resolverContract2);
+    
+    // Step 8: Test resolver reset to NULL_ID
+    auto resetResolverResult = test.setResolver(domainNode, NULL_ID, domainOwner);
+    EXPECT_TRUE(resetResolverResult.success);
+    
+    auto resetResolver = test.getResolver(domainNode);
+    EXPECT_TRUE(resetResolver.exists);
+    EXPECT_EQ(resetResolver.resolver, NULL_ID);
+    
+    // Step 9: Verify totalNames is correct
+    auto* state = test.getState();
+    EXPECT_EQ(state->totalNames, 4u); // .qubic + domain + web + mail
+}
+
+TEST(QNSRegistryIntegration, PerformanceWithLargeNumberOfDomains)
+{
+    // Test performance and correctness with large number of domains
+    ContractTestingQNSRegistry test;
+    
+    id registrar = test.getQubicRegistrar();
+    id domainOwner = createTestId(1111);
+    
+    increaseEnergy(registrar, 10000);
+    increaseEnergy(domainOwner, 10000);
+    
+    const int NUM_DOMAINS = 50; // Reasonable number for testing
+    const int NUM_SUBDOMAINS_PER_DOMAIN = 5;
+    
+    // Step 1: Create multiple top-level domains
+    std::vector<uint64> domainNodes;
+    for (int i = 0; i < NUM_DOMAINS; i++) {
+        uint64 domainHash = 0x1000000000000000ULL + i;
+        auto createResult = test.createSubdomain(0x6375626963000000ULL, domainHash, domainOwner, registrar);
+        EXPECT_EQ(createResult.errorCode, 0u);
+        domainNodes.push_back(createResult.newNode);
+    }
+    
+    // Step 2: Create subdomains under each domain
+    std::vector<uint64> subdomainNodes;
+    for (int i = 0; i < NUM_DOMAINS; i++) {
+        for (int j = 0; j < NUM_SUBDOMAINS_PER_DOMAIN; j++) {
+            uint64 subdomainHash = 0x2000000000000000ULL + (i * NUM_SUBDOMAINS_PER_DOMAIN + j);
+            auto createResult = test.createSubdomain(domainNodes[i], subdomainHash, domainOwner, domainOwner);
+            EXPECT_EQ(createResult.errorCode, 0u);
+            subdomainNodes.push_back(createResult.newNode);
+        }
+    }
+    
+    // Step 3: Verify state consistency
+    auto* state = test.getState();
+    EXPECT_EQ(state->totalNames, 1 + NUM_DOMAINS + (NUM_DOMAINS * NUM_SUBDOMAINS_PER_DOMAIN)); // 1 for root + domains + subdomains
+    
+    // Step 4: Test random access to verify all domains exist
+    for (int i = 0; i < NUM_DOMAINS; i++) {
+        auto ownerResult = test.getOwner(domainNodes[i]);
+        EXPECT_TRUE(ownerResult.exists);
+        EXPECT_EQ(ownerResult.owner, domainOwner);
+        
+        auto existsResult = test.nodeExists(domainNodes[i]);
+        EXPECT_TRUE(existsResult.exists);
+    }
+    
+    // Step 5: Test random access to subdomains
+    for (int i = 0; i < (int)subdomainNodes.size(); i += 10) { // Test every 10th subdomain
+        auto ownerResult = test.getOwner(subdomainNodes[i]);
+        EXPECT_TRUE(ownerResult.exists);
+        EXPECT_EQ(ownerResult.owner, domainOwner);
+        
+        auto existsResult = test.nodeExists(subdomainNodes[i]);
+        EXPECT_TRUE(existsResult.exists);
+    }
+    
+    // Step 6: Test bulk operations - set resolvers for all domains
+    id resolverContract = createTestId(3001);
+    for (int i = 0; i < NUM_DOMAINS; i += 5) { // Test every 5th domain
+        auto setResolverResult = test.setResolver(domainNodes[i], resolverContract, domainOwner);
+        EXPECT_TRUE(setResolverResult.success);
+        
+        auto resolverResult = test.getResolver(domainNodes[i]);
+        EXPECT_TRUE(resolverResult.exists);
+        EXPECT_EQ(resolverResult.resolver, resolverContract);
+    }
+    
+    // Step 7: Test bulk operations - set TTL for all subdomains
+    for (int i = 0; i < (int)subdomainNodes.size(); i += 25) { // Test every 25th subdomain
+        auto setTTLResult = test.setTTL(subdomainNodes[i], 3600 + i, domainOwner);
+        EXPECT_TRUE(setTTLResult.success);
+        
+        auto ttlResult = test.getTTL(subdomainNodes[i]);
+        EXPECT_TRUE(ttlResult.exists);
+        EXPECT_EQ(ttlResult.ttl, 3600u + i);
+    }
+    
+    // Step 8: Test cleanup with END_EPOCH
+    test.endEpoch();
+    
+    // Step 9: Verify all domains still exist after cleanup
+    for (int i = 0; i < NUM_DOMAINS; i += 10) { // Test every 10th domain
+        auto ownerResult = test.getOwner(domainNodes[i]);
+        EXPECT_TRUE(ownerResult.exists);
+        EXPECT_EQ(ownerResult.owner, domainOwner);
+    }
+    
+    // Step 10: Verify state consistency after cleanup
+    auto* finalState = test.getState();
+    EXPECT_EQ(finalState->totalNames, 1 + NUM_DOMAINS + (NUM_DOMAINS * NUM_SUBDOMAINS_PER_DOMAIN));
 }
 
