@@ -275,8 +275,9 @@ static bool saveStateTxStatus(const unsigned int numberOfTransactions, CHAR16* d
 static bool loadStateTxStatus(const unsigned int numberOfTransactions, CHAR16* directory)
 {
     static unsigned short TX_STATUS_SNAPSHOT_FILE_NAME[] = L"snapshotTxStatusData";
-    long long loadedSize = load(TX_STATUS_SNAPSHOT_FILE_NAME, sizeof(txStatusData), (unsigned char*)&txStatusData, directory);
-    if (loadedSize != sizeof(txStatusData))
+    const long long OLD_TX_STATUS_SIZE = 1617800;
+    long long loadedSize = load(TX_STATUS_SNAPSHOT_FILE_NAME, OLD_TX_STATUS_SIZE, (unsigned char*)&txStatusData, directory);
+    if (loadedSize != OLD_TX_STATUS_SIZE))
     {
         logToConsole(L"Failed to load txStatusData");
         return false;
