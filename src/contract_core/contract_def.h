@@ -194,6 +194,11 @@
 #include "contracts/QIP.h"
 
 #endif
+
+#undef CONTRACT_INDEX
+#undef CONTRACT_STATE_TYPE
+#undef CONTRACT_STATE2_TYPE
+
 #define QNS_REGISTRY_CONTRACT_INDEX 19
 #define CONTRACT_INDEX QNS_REGISTRY_CONTRACT_INDEX
 #define CONTRACT_STATE_TYPE QNS_REGISTRY
@@ -201,6 +206,10 @@
 #include "contracts/QNSRegistry.h"
 
 // new contracts should be added above this line
+
+#undef CONTRACT_INDEX
+#undef CONTRACT_STATE_TYPE
+#undef CONTRACT_STATE2_TYPE
 
 #ifdef INCLUDE_CONTRACT_TEST_EXAMPLES
 constexpr unsigned short TESTEXA_CONTRACT_INDEX = (CONTRACT_INDEX + 1);
