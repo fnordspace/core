@@ -130,6 +130,7 @@
     <ClCompile Include="contract_msvault.cpp" />
     <ClCompile Include="contract_qearn.cpp" />
     <ClCompile Include="contract_qns_registry.cpp" />
+    <ClCompile Include="contract_qns_registrar.cpp" />
     <ClCompile Include="contract_qutil.cpp" />
     <ClCompile Include="contract_qx.cpp" />
     <ClCompile Include="contract_qvault.cpp" />
