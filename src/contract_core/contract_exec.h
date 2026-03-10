@@ -171,6 +171,7 @@ static bool initContractExec()
     setMem(contractUserProcedureInputSizes, sizeof(contractUserProcedureInputSizes), 0);
     setMem(contractUserProcedureOutputSizes, sizeof(contractUserProcedureOutputSizes), 0);
     setMem(contractUserProcedureLocalsSizes, sizeof(contractUserProcedureLocalsSizes), 0);
+    setMem(contractUserProcedureMinInvocationReward, sizeof(contractUserProcedureMinInvocationReward), 0);
 
     for (ContractLocalsStack::SizeType i = 0; i < NUMBER_OF_CONTRACT_EXECUTION_BUFFERS; ++i)
         contractLocalsStack[i].init();
@@ -367,7 +368,7 @@ const QpiContextFunctionCall* QPI::QpiContextFunctionCall::__qpiConstructContext
 }
 
 // Called before a contract runs a user procedure of another contract or a system procedure
-const QpiContextProcedureCall* QPI::QpiContextProcedureCall::__qpiConstructProcedureCallContext(unsigned int procContractIndex, QPI::sint64 invocationReward, InterContractCallError& callError, bool skipFeeCheck) const
+const QpiContextProcedureCall* QPI::QpiContextProcedureCall::__qpiConstructProcedureCallContext(unsigned int procContractIndex, QPI::sint64 invocationReward, InterContractCallError& callError, bool skipFeeCheck, void* procFuncPtr) const
 {
     ASSERT(_entryPoint != USER_FUNCTION_CALL);
     ASSERT(_stackIndex >= 0 && _stackIndex < NUMBER_OF_CONTRACT_EXECUTION_BUFFERS);
@@ -387,6 +388,25 @@ const QpiContextProcedureCall* QPI::QpiContextProcedureCall::__qpiConstructProce
     {
         callError = CallErrorInsufficientFees;
         return nullptr;
+    }
+
+    // Check if invocation reward meets the minimum required by the called procedure
+    if (!skipFeeCheck && procFuncPtr)
+    {
+        // Look up the inputType by scanning the procedure function pointer table
+        for (unsigned short __i = 1; __i != 0; ++__i)
+        {
+            if (contractUserProcedures[procContractIndex][__i] == (USER_PROCEDURE)procFuncPtr)
+            {
+                if (contractUserProcedureMinInvocationReward[procContractIndex][__i] > 0
+                    && invocationReward < contractUserProcedureMinInvocationReward[procContractIndex][__i])
+                {
+                    callError = CallErrorInsufficientInvocationReward;
+                    return nullptr;
+                }
+                break;
+            }
+        }
     }
 
     char* buffer = contractLocalsStack[_stackIndex].allocate(sizeof(QpiContextProcedureCall));

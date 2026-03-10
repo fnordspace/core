@@ -250,6 +250,8 @@ struct
 #endif
 static bool saveContractStateFiles(CHAR16* directory = NULL);
 static bool saveContractExecFeeFiles(CHAR16* directory = NULL, bool saveAccumulatedTime = false);
+static bool saveMinInvocationRewardFile(CHAR16* directory = NULL);
+static bool loadMinInvocationRewardFile(CHAR16* directory = NULL);
 static bool saveSystem(CHAR16* directory = NULL);
 static bool loadContractStateFiles(CHAR16* directory = NULL, bool forceLoadFromFile = false);
 static bool loadContractExecFeeFiles(CHAR16* directory = NULL, bool loadAccumulatedTime = false);
@@ -3044,6 +3046,25 @@ static void processTickTransaction(const Transaction* transaction, unsigned int 
                             }
                             moneyFlew = false;
                         }
+                        else if (contractUserProcedures[contractIndex][transaction->inputType] != nullptr
+                            && contractUserProcedureMinInvocationReward[contractIndex][transaction->inputType] > 0
+                            && transaction->amount < contractUserProcedureMinInvocationReward[contractIndex][transaction->inputType])
+                        {
+                            // Transaction amount below minimum invocation reward required by procedure - refund
+                            if (transaction->amount > 0)
+                            {
+                                int destIndex = ::spectrumIndex(transaction->destinationPublicKey);
+                                if (destIndex >= 0)
+                                {
+                                    decreaseEnergy(destIndex, transaction->amount);
+                                    increaseEnergy(transaction->sourcePublicKey, transaction->amount);
+
+                                    const QuTransfer quTransfer = { transaction->destinationPublicKey, transaction->sourcePublicKey, transaction->amount };
+                                    logger.logQuTransfer(quTransfer);
+                                }
+                            }
+                            moneyFlew = false;
+                        }
                         else
                         {
                             // Regular contract procedure invocation
@@ -3891,6 +3912,10 @@ static void beginEpoch()
     CONTRACT_EXEC_FEES_REC_FILE_NAME[sizeof(CONTRACT_EXEC_FEES_REC_FILE_NAME) / sizeof(CONTRACT_EXEC_FEES_REC_FILE_NAME[0]) - 3] = (system.epoch % 100) / 10 + L'0';
     CONTRACT_EXEC_FEES_REC_FILE_NAME[sizeof(CONTRACT_EXEC_FEES_REC_FILE_NAME) / sizeof(CONTRACT_EXEC_FEES_REC_FILE_NAME[0]) - 2] = system.epoch % 10 + L'0';
 
+    CONTRACT_MIN_INVOC_REWARD_FILE_NAME[sizeof(CONTRACT_MIN_INVOC_REWARD_FILE_NAME) / sizeof(CONTRACT_MIN_INVOC_REWARD_FILE_NAME[0]) - 4] = system.epoch / 100 + L'0';
+    CONTRACT_MIN_INVOC_REWARD_FILE_NAME[sizeof(CONTRACT_MIN_INVOC_REWARD_FILE_NAME) / sizeof(CONTRACT_MIN_INVOC_REWARD_FILE_NAME[0]) - 3] = (system.epoch % 100) / 10 + L'0';
+    CONTRACT_MIN_INVOC_REWARD_FILE_NAME[sizeof(CONTRACT_MIN_INVOC_REWARD_FILE_NAME) / sizeof(CONTRACT_MIN_INVOC_REWARD_FILE_NAME[0]) - 2] = system.epoch % 10 + L'0';
+
     score->initMemory();
     score->resetTaskQueue();
     setMem(minerSolutionFlags, NUMBER_OF_MINER_SOLUTION_FLAGS / 8, 0);
@@ -4348,6 +4373,10 @@ static bool saveAllNodeStates()
     CONTRACT_EXEC_FEES_REC_FILE_NAME[sizeof(CONTRACT_EXEC_FEES_REC_FILE_NAME) / sizeof(CONTRACT_EXEC_FEES_REC_FILE_NAME[0]) - 3] = L'0';
     CONTRACT_EXEC_FEES_REC_FILE_NAME[sizeof(CONTRACT_EXEC_FEES_REC_FILE_NAME) / sizeof(CONTRACT_EXEC_FEES_REC_FILE_NAME[0]) - 2] = L'0';
 
+    CONTRACT_MIN_INVOC_REWARD_FILE_NAME[sizeof(CONTRACT_MIN_INVOC_REWARD_FILE_NAME) / sizeof(CONTRACT_MIN_INVOC_REWARD_FILE_NAME[0]) - 4] = L'0';
+    CONTRACT_MIN_INVOC_REWARD_FILE_NAME[sizeof(CONTRACT_MIN_INVOC_REWARD_FILE_NAME) / sizeof(CONTRACT_MIN_INVOC_REWARD_FILE_NAME[0]) - 3] = L'0';
+    CONTRACT_MIN_INVOC_REWARD_FILE_NAME[sizeof(CONTRACT_MIN_INVOC_REWARD_FILE_NAME) / sizeof(CONTRACT_MIN_INVOC_REWARD_FILE_NAME[0]) - 2] = L'0';
+
     setText(message, L"Saving computer files");
     logToConsole(message);
     if (!saveContractStateFiles(directory))
@@ -4358,6 +4387,11 @@ static bool saveAllNodeStates()
     if (!saveContractExecFeeFiles(directory, /*saveAccumulatedTime=*/true))
     {
         logToConsole(L"Failed to save contract execution fee files");
+        return false;
+    }
+    if (!saveMinInvocationRewardFile(directory))
+    {
+        logToConsole(L"Failed to save min invocation reward file");
         return false;
     }
 
@@ -4531,9 +4565,18 @@ static bool loadAllNodeStates()
     CONTRACT_EXEC_FEES_REC_FILE_NAME[sizeof(CONTRACT_EXEC_FEES_REC_FILE_NAME) / sizeof(CONTRACT_EXEC_FEES_REC_FILE_NAME[0]) - 3] = L'0';
     CONTRACT_EXEC_FEES_REC_FILE_NAME[sizeof(CONTRACT_EXEC_FEES_REC_FILE_NAME) / sizeof(CONTRACT_EXEC_FEES_REC_FILE_NAME[0]) - 2] = L'0';
 
+    CONTRACT_MIN_INVOC_REWARD_FILE_NAME[sizeof(CONTRACT_MIN_INVOC_REWARD_FILE_NAME) / sizeof(CONTRACT_MIN_INVOC_REWARD_FILE_NAME[0]) - 4] = L'0';
+    CONTRACT_MIN_INVOC_REWARD_FILE_NAME[sizeof(CONTRACT_MIN_INVOC_REWARD_FILE_NAME) / sizeof(CONTRACT_MIN_INVOC_REWARD_FILE_NAME[0]) - 3] = L'0';
+    CONTRACT_MIN_INVOC_REWARD_FILE_NAME[sizeof(CONTRACT_MIN_INVOC_REWARD_FILE_NAME) / sizeof(CONTRACT_MIN_INVOC_REWARD_FILE_NAME[0]) - 2] = L'0';
+
     if (!loadContractExecFeeFiles(directory, /*loadAccumulatedTime=*/true))
     {
         logToConsole(L"Failed to load contract execution fee files");
+        return false;
+    }
+    if (!loadMinInvocationRewardFile(directory))
+    {
+        logToConsole(L"Failed to load min invocation reward file");
         return false;
     }
 
@@ -5866,6 +5909,34 @@ static bool saveContractExecFeeFiles(CHAR16* directory, bool saveAccumulatedTime
     return true;
 }
 
+static bool saveMinInvocationRewardFile(CHAR16* directory)
+{
+    logToConsole(L"Saving min invocation reward file...");
+    long long savedSize = save(CONTRACT_MIN_INVOC_REWARD_FILE_NAME, sizeof(contractUserProcedureMinInvocationReward), (unsigned char*)contractUserProcedureMinInvocationReward, directory);
+    if (savedSize != sizeof(contractUserProcedureMinInvocationReward))
+    {
+        logToConsole(L"Failed to save min invocation reward file!");
+        return false;
+    }
+    logToConsole(L"Min invocation reward file saved.");
+    return true;
+}
+
+static bool loadMinInvocationRewardFile(CHAR16* directory)
+{
+    logToConsole(L"Loading min invocation reward file...");
+    long long loadedSize = load(CONTRACT_MIN_INVOC_REWARD_FILE_NAME, sizeof(contractUserProcedureMinInvocationReward), (unsigned char*)contractUserProcedureMinInvocationReward, directory);
+    if (loadedSize != sizeof(contractUserProcedureMinInvocationReward))
+    {
+        // Non-fatal: file may not exist yet, keep array zeroed
+        setMem(contractUserProcedureMinInvocationReward, sizeof(contractUserProcedureMinInvocationReward), 0);
+        logToConsole(L"Min invocation reward file not found or invalid, initialized to zeros.");
+        return true;
+    }
+    logToConsole(L"Min invocation reward file loaded.");
+    return true;
+}
+
 static bool saveSystem(CHAR16* directory)
 {
     logToConsole(L"Saving system file...");
@@ -6123,6 +6194,7 @@ static bool initialize()
             if (!loadContractExecFeeFiles())
                 return false;
 #endif
+            loadMinInvocationRewardFile();
 
 #ifdef INCLUDE_CONTRACT_TEST_EXAMPLES
             // fill execution fee reserves for test contracts
@@ -7092,6 +7164,12 @@ static void processKeyPresses()
 
             saveContractExecFeeFiles();
 
+            CONTRACT_MIN_INVOC_REWARD_FILE_NAME[sizeof(CONTRACT_MIN_INVOC_REWARD_FILE_NAME) / sizeof(CONTRACT_MIN_INVOC_REWARD_FILE_NAME[0]) - 4] = L'0';
+            CONTRACT_MIN_INVOC_REWARD_FILE_NAME[sizeof(CONTRACT_MIN_INVOC_REWARD_FILE_NAME) / sizeof(CONTRACT_MIN_INVOC_REWARD_FILE_NAME[0]) - 3] = L'0';
+            CONTRACT_MIN_INVOC_REWARD_FILE_NAME[sizeof(CONTRACT_MIN_INVOC_REWARD_FILE_NAME) / sizeof(CONTRACT_MIN_INVOC_REWARD_FILE_NAME[0]) - 2] = L'0';
+
+            saveMinInvocationRewardFile();
+
 #ifdef ENABLE_PROFILING
             gProfilingDataCollector.writeToFile();
 #endif
@@ -7689,6 +7767,7 @@ EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemTable)
                 {
                     saveContractStateFiles();
                     saveContractExecFeeFiles();
+                    saveMinInvocationRewardFile();
                     computerMustBeSaved = false;
                 }
 

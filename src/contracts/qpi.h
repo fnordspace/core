@@ -57,6 +57,7 @@ namespace QPI
 		CallErrorContractInErrorState = 1,      // Called contract is already in error state
 		CallErrorInsufficientFees = 2,          // Called contract has no execution fee reserve
 		CallErrorAllocationFailed = 3,          // Failed to allocate context on stack
+		CallErrorInsufficientInvocationReward = 4, // Invocation reward below procedure minimum
 	};
 
 	typedef uint128_t uint128;
@@ -2474,6 +2475,10 @@ namespace QPI
 		// If the provided index is invalid (< 1 or >= contractCount) the currentContractIndex is used instead.
 		inline sint64 queryFeeReserve(uint32 contractIndex = 0) const;
 
+		// Return the minimum invocation reward required for the specified inputType of the specified contract.
+		// If the provided contractIndex is invalid (< 1 or >= contractCount) the currentContractIndex is used instead.
+		inline sint64 queryMinInvocationReward(uint16 inputType, uint32 contractIndex = 0) const;
+
 		/**
 		* @brief Get oracle query by queryId.
 		* @param queryId Identifier of oracle query to get query data from.
@@ -2553,9 +2558,13 @@ namespace QPI
 			sint64 offeredTransferFee
 		) const; // Returns payed fee on success (>= 0), -requestedFee if offeredTransferFee or contract balance is not sufficient, INVALID_AMOUNT in case of other error.
 
+		// Set the minimum invocation reward required for the specified inputType of this contract's procedures.
+		// inputType must be > 0 and amount must be >= 0. Returns true on success, false on invalid input.
+		inline bool setMinInvocationReward(uint16 inputType, sint64 amount) const;
+
 		// Burns Qus from the current contract's balance to fill the contract fee reserve of the contract specified via contractIndexBurnedFor.
 		// If the provided index is invalid (< 1 or >= contractCount), the Qus are burned for the currentContractIndex.
-		// Returns the remaining balance (>= 0) of the current contract if the burning is successful. A negative return value indicates failure.  
+		// Returns the remaining balance (>= 0) of the current contract if the burning is successful. A negative return value indicates failure.
 		inline sint64 burn(
 			sint64 amount,
 			uint32 contractIndexBurnedFor = 0
@@ -2651,7 +2660,7 @@ namespace QPI
 
 
 		// Internal functions, calling not allowed in contracts
-		inline const QpiContextProcedureCall* __qpiConstructProcedureCallContext(unsigned int otherContractIndex, sint64 invocationReward, InterContractCallError& callError, bool skipFeeCheck = false) const;
+		inline const QpiContextProcedureCall* __qpiConstructProcedureCallContext(unsigned int otherContractIndex, sint64 invocationReward, InterContractCallError& callError, bool skipFeeCheck = false, void* procFuncPtr = nullptr) const;
 		inline void* __qpiAcquireStateForWriting(unsigned int contractIndex) const;
 		inline void __qpiReleaseStateForWriting(unsigned int contractIndex) const;
 		template <unsigned int sysProcId, typename InputType, typename OutputType>
@@ -3065,7 +3074,7 @@ namespace QPI
 		static_assert(contractStateType::__contract_index < CONTRACT_STATE_TYPE::__contract_index, "You can only call contracts with lower index."); \
 		InterContractCallError errorVar; \
 		do { \
-			const QpiContextProcedureCall* __ctx = qpi.__qpiConstructProcedureCallContext(contractStateType::__contract_index, invocationReward, errorVar); \
+			const QpiContextProcedureCall* __ctx = qpi.__qpiConstructProcedureCallContext(contractStateType::__contract_index, invocationReward, errorVar, false, (void*)(contractStateType::procedure)); \
 			if (__ctx) { \
 				QPI::ContractState<contractStateType::StateData, contractStateType::__contract_index>* __state = (QPI::ContractState<contractStateType::StateData, contractStateType::__contract_index>*)qpi.__qpiAcquireStateForWriting(contractStateType::__contract_index); \
 				contractStateType::procedure##_locals* __locals = (contractStateType::procedure##_locals*)qpi.__qpiAllocLocals(sizeof(contractStateType::procedure##_locals)); \

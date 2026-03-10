@@ -423,6 +423,34 @@ public:
         return output;
     }
 
+    void setMinInvocationReward(uint16 inputType, sint64 amount)
+    {
+        TESTEXA::SetMinInvocationReward_input input;
+        input.inputType = inputType;
+        input.amount = amount;
+        TESTEXA::SetMinInvocationReward_output output;
+        invokeUserProcedure(TESTEXA_CONTRACT_INDEX, 9, input, output, USER1, 0);
+    }
+
+    sint64 queryMinInvocationReward(uint32 contractIndex, uint16 inputType)
+    {
+        TESTEXA::QueryMinInvocationReward_input input;
+        input.contractIndex = contractIndex;
+        input.inputType = inputType;
+        TESTEXA::QueryMinInvocationReward_output output;
+        callFunction(TESTEXA_CONTRACT_INDEX, 6, input, output);
+        return output.minInvocationReward;
+    }
+
+    TESTEXB::TestInterContractMinInvocationReward_output testInterContractMinInvocationReward(sint64 invocationReward)
+    {
+        TESTEXB::TestInterContractMinInvocationReward_input input;
+        input.invocationReward = invocationReward;
+        TESTEXB::TestInterContractMinInvocationReward_output output;
+        invokeUserProcedure(TESTEXB_CONTRACT_INDEX, 51, input, output, USER1, invocationReward);
+        return output;
+    }
+
     template <typename StateStruct>
     std::vector<uint16> getShareholderProposalIndices(bit activeProposals)
     {
@@ -2255,4 +2283,129 @@ TEST(ContractTestEx, OracleSubscription)
     // unsubscribe all
     EXPECT_TRUE(test.unsubscribeOracle(USER1, subId2));
     EXPECT_TRUE(test.unsubscribeOracle(USER1, subId3));
+}
+
+TEST(ContractTestEx, MinInvocationRewardQueryDefault)
+{
+    ContractTestingTestEx test;
+
+    // Default minimum invocation reward should be 0 for all procedures
+    EXPECT_EQ(test.queryMinInvocationReward(TESTEXA_CONTRACT_INDEX, 1), 0);
+    EXPECT_EQ(test.queryMinInvocationReward(TESTEXA_CONTRACT_INDEX, 7), 0);
+    EXPECT_EQ(test.queryMinInvocationReward(TESTEXA_CONTRACT_INDEX, 9), 0);
+    EXPECT_EQ(test.queryMinInvocationReward(TESTEXB_CONTRACT_INDEX, 50), 0);
+}
+
+TEST(ContractTestEx, MinInvocationRewardSetAndQuery)
+{
+    ContractTestingTestEx test;
+    increaseEnergy(USER1, 1000000);
+
+    // Set minimum invocation reward for inputType 7 (QueryQpiFunctionsToState)
+    test.setMinInvocationReward(7, 5000);
+
+    // Query it back
+    EXPECT_EQ(test.queryMinInvocationReward(TESTEXA_CONTRACT_INDEX, 7), 5000);
+
+    // Other inputTypes should still be 0
+    EXPECT_EQ(test.queryMinInvocationReward(TESTEXA_CONTRACT_INDEX, 1), 0);
+    EXPECT_EQ(test.queryMinInvocationReward(TESTEXA_CONTRACT_INDEX, 9), 0);
+}
+
+TEST(ContractTestEx, MinInvocationRewardDynamicUpdate)
+{
+    ContractTestingTestEx test;
+    increaseEnergy(USER1, 1000000);
+
+    // Set initial minimum
+    test.setMinInvocationReward(7, 1000);
+    EXPECT_EQ(test.queryMinInvocationReward(TESTEXA_CONTRACT_INDEX, 7), 1000);
+
+    // Update to a higher value
+    test.setMinInvocationReward(7, 5000);
+    EXPECT_EQ(test.queryMinInvocationReward(TESTEXA_CONTRACT_INDEX, 7), 5000);
+
+    // Update to a lower value
+    test.setMinInvocationReward(7, 100);
+    EXPECT_EQ(test.queryMinInvocationReward(TESTEXA_CONTRACT_INDEX, 7), 100);
+
+    // Set to 0 to disable
+    test.setMinInvocationReward(7, 0);
+    EXPECT_EQ(test.queryMinInvocationReward(TESTEXA_CONTRACT_INDEX, 7), 0);
+}
+
+TEST(ContractTestEx, MinInvocationRewardMultipleProcedures)
+{
+    ContractTestingTestEx test;
+    increaseEnergy(USER1, 1000000);
+
+    // Set different minimums for different inputTypes
+    test.setMinInvocationReward(7, 1000);
+    test.setMinInvocationReward(8, 2000);
+    test.setMinInvocationReward(9, 3000);
+
+    // Verify each one independently
+    EXPECT_EQ(test.queryMinInvocationReward(TESTEXA_CONTRACT_INDEX, 7), 1000);
+    EXPECT_EQ(test.queryMinInvocationReward(TESTEXA_CONTRACT_INDEX, 8), 2000);
+    EXPECT_EQ(test.queryMinInvocationReward(TESTEXA_CONTRACT_INDEX, 9), 3000);
+}
+
+TEST(ContractTestEx, MinInvocationRewardInvalidInput)
+{
+    ContractTestingTestEx test;
+    increaseEnergy(USER1, 1000000);
+
+    // inputType=0 should not be settable (reserved)
+    test.setMinInvocationReward(0, 1000);
+    EXPECT_EQ(test.queryMinInvocationReward(TESTEXA_CONTRACT_INDEX, 0), 0);
+
+    // Negative amounts should not be accepted
+    test.setMinInvocationReward(7, -100);
+    EXPECT_EQ(test.queryMinInvocationReward(TESTEXA_CONTRACT_INDEX, 7), 0);
+}
+
+TEST(ContractTestEx, MinInvocationRewardInterContractCall_Sufficient)
+{
+    ContractTestingTestEx test;
+    increaseEnergy(USER1, 1000000);
+    increaseEnergy(TESTEXB_CONTRACT_ID, 1000000);
+
+    // Set minimum invocation reward for QueryQpiFunctionsToState (inputType 7 in TESTEXA)
+    test.setMinInvocationReward(7, 5000);
+    EXPECT_EQ(test.queryMinInvocationReward(TESTEXA_CONTRACT_INDEX, 7), 5000);
+
+    // Call from TESTEXB with enough invocation reward - should succeed
+    auto output = test.testInterContractMinInvocationReward(5001);
+    EXPECT_EQ(output.errorCode, QPI::NoCallError);
+    EXPECT_EQ(output.callSucceeded, 1);
+}
+
+TEST(ContractTestEx, MinInvocationRewardInterContractCall_Insufficient)
+{
+    ContractTestingTestEx test;
+    increaseEnergy(USER1, 1000000);
+    increaseEnergy(TESTEXB_CONTRACT_ID, 1000000);
+
+    // Set minimum invocation reward for QueryQpiFunctionsToState (inputType 7 in TESTEXA)
+    test.setMinInvocationReward(7, 5000);
+
+    // Call from TESTEXB with insufficient invocation reward - should fail
+    auto output = test.testInterContractMinInvocationReward(4999);
+    EXPECT_EQ(output.errorCode, QPI::CallErrorInsufficientInvocationReward);
+    EXPECT_EQ(output.callSucceeded, 0);
+}
+
+TEST(ContractTestEx, MinInvocationRewardInterContractCall_Exact)
+{
+    ContractTestingTestEx test;
+    increaseEnergy(USER1, 1000000);
+    increaseEnergy(TESTEXB_CONTRACT_ID, 1000000);
+
+    // Set minimum invocation reward for QueryQpiFunctionsToState (inputType 7 in TESTEXA)
+    test.setMinInvocationReward(7, 5000);
+
+    // Call from TESTEXB with exactly the minimum - should succeed
+    auto output = test.testInterContractMinInvocationReward(5000);
+    EXPECT_EQ(output.errorCode, QPI::NoCallError);
+    EXPECT_EQ(output.callSucceeded, 1);
 }

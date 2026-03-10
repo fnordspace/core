@@ -445,6 +445,39 @@ protected:
 	}
 
 	//---------------------------------------------------------------
+	// MINIMUM INVOCATION REWARD
+
+public:
+	struct SetMinInvocationReward_input
+	{
+		uint16 inputType;
+		sint64 amount;
+	};
+	typedef NoData SetMinInvocationReward_output;
+
+	struct QueryMinInvocationReward_input
+	{
+		uint32 contractIndex;
+		uint16 inputType;
+	};
+	struct QueryMinInvocationReward_output
+	{
+		sint64 minInvocationReward;
+	};
+
+protected:
+
+	PUBLIC_PROCEDURE(SetMinInvocationReward)
+	{
+		qpi.setMinInvocationReward(input.inputType, input.amount);
+	}
+
+	PUBLIC_FUNCTION(QueryMinInvocationReward)
+	{
+		output.minInvocationReward = qpi.queryMinInvocationReward(input.inputType, input.contractIndex);
+	}
+
+	//---------------------------------------------------------------
 	// CONTRACT INTERACTION / RESOLVING DEADLOCKS / ERROR HANDLING
 public:
 	typedef NoData ErrorTriggerFunction_input;
@@ -837,6 +870,7 @@ public:
 		REGISTER_USER_FUNCTION(ReturnQpiFunctionsOutputEndTick, 3);
 		REGISTER_USER_FUNCTION(ReturnQpiFunctionsOutputUserProc, 4);
 		REGISTER_USER_FUNCTION(ErrorTriggerFunction, 5);
+		REGISTER_USER_FUNCTION(QueryMinInvocationReward, 6);
 
 		REGISTER_USER_PROCEDURE(IssueAsset, 1);
 		REGISTER_USER_PROCEDURE(TransferShareOwnershipAndPossession, 2);
@@ -846,6 +880,7 @@ public:
 		REGISTER_USER_PROCEDURE(AcquireShareManagementRights, 6);
 		REGISTER_USER_PROCEDURE(QueryQpiFunctionsToState, 7);
 		REGISTER_USER_PROCEDURE(RunHeavyComputation, 8);
+		REGISTER_USER_PROCEDURE(SetMinInvocationReward, 9);
 
 		REGISTER_USER_PROCEDURE(SetProposalInOtherContractAsShareholder, 40);
 		REGISTER_USER_PROCEDURE(SetVotesInOtherContractAsShareholder, 41);

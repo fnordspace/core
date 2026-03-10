@@ -398,6 +398,7 @@ GLOBAL_VAR_DECL unsigned short contractUserProcedureOutputSizes[contractCount][6
 // probably due to buffer overflow that is difficult to reproduce in test net
 // TODO: change back to unsigned int
 GLOBAL_VAR_DECL unsigned short contractUserProcedureLocalsSizes[contractCount][65536];
+GLOBAL_VAR_DECL long long contractUserProcedureMinInvocationReward[contractCount][65536];
 
 enum SystemProcedureID
 {

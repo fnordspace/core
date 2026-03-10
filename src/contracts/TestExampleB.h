@@ -607,6 +607,33 @@ public:
 		output.callSucceeded = (interContractCallError == NoCallError) ? 1 : 0;
 	}
 
+	// Test inter-contract call with minimum invocation reward check
+	struct TestInterContractMinInvocationReward_input
+	{
+		sint64 invocationReward;
+	};
+
+	struct TestInterContractMinInvocationReward_output
+	{
+		uint8 errorCode;
+		uint8 callSucceeded; // 1 if call happened, 0 if it was skipped
+	};
+
+	struct TestInterContractMinInvocationReward_locals
+	{
+		TESTEXA::QueryQpiFunctionsToState_input procInput;
+		TESTEXA::QueryQpiFunctionsToState_output procOutput;
+	};
+
+	PUBLIC_PROCEDURE_WITH_LOCALS(TestInterContractMinInvocationReward)
+	{
+		// Try to invoke QueryQpiFunctionsToState in TestExampleA with specified invocation reward
+		INVOKE_OTHER_CONTRACT_PROCEDURE(TESTEXA, QueryQpiFunctionsToState, locals.procInput, locals.procOutput, input.invocationReward);
+
+		output.errorCode = interContractCallError;
+		output.callSucceeded = (interContractCallError == NoCallError) ? 1 : 0;
+	}
+
 	//---------------------------------------------------------------
 	// COMMON PARTS
 
@@ -631,6 +658,7 @@ public:
 		REGISTER_USER_PROCEDURE(SetProposalInOtherContractAsShareholder, 40);
 		REGISTER_USER_PROCEDURE(SetVotesInOtherContractAsShareholder, 41);
 		REGISTER_USER_PROCEDURE(TestInterContractCallError, 50);
+		REGISTER_USER_PROCEDURE(TestInterContractMinInvocationReward, 51);
 
 		REGISTER_SHAREHOLDER_PROPOSAL_VOTING();
 	}
