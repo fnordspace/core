@@ -353,6 +353,16 @@ public:
         sint64 reserveAmount;
     };
 
+    struct QueryMinInvocationReward_input
+    {
+        uint32 contractIndex;
+        uint16 inputType;
+    };
+    struct QueryMinInvocationReward_output
+    {
+        sint64 minInvocationReward;
+    };
+
     typedef Asset GetTotalNumberOfAssetShares_input;
     typedef sint64 GetTotalNumberOfAssetShares_output;
 
@@ -1381,6 +1391,11 @@ public:
         output.reserveAmount = qpi.queryFeeReserve(input.contractIndex);
     }
 
+    PUBLIC_FUNCTION(QueryMinInvocationReward)
+    {
+        output.minInvocationReward = qpi.queryMinInvocationReward(input.inputType, input.contractIndex);
+    }
+
     /**
     * Create a new poll with min amount, and GitHub link, and list of allowed assets
     */
@@ -2069,6 +2084,7 @@ public:
         REGISTER_USER_FUNCTION(GetFees, 7);
         REGISTER_USER_FUNCTION(QueryFeeReserve, 8);
         REGISTER_USER_FUNCTION(GetBalances16, 9);
+        REGISTER_USER_FUNCTION(QueryMinInvocationReward, 10);
 
         REGISTER_USER_PROCEDURE(SendToManyV1, 1);
         REGISTER_USER_PROCEDURE(BurnQubic, 2);

@@ -93,6 +93,23 @@ long long QPI::QpiContextFunctionCall::queryFeeReserve(unsigned int contractInde
     return getContractFeeReserve(contractIndex);
 }
 
+long long QPI::QpiContextFunctionCall::queryMinInvocationReward(unsigned short inputType, unsigned int contractIndex) const
+{
+    if (contractIndex < 1 || contractIndex >= contractCount)
+        contractIndex = _currentContractIndex;
+
+    return contractUserProcedureMinInvocationReward[contractIndex][inputType];
+}
+
+bool QPI::QpiContextProcedureCall::setMinInvocationReward(unsigned short inputType, long long amount) const
+{
+    if (inputType == 0 || amount < 0)
+        return false;
+
+    contractUserProcedureMinInvocationReward[_currentContractIndex][inputType] = amount;
+    return true;
+}
+
 long long QPI::QpiContextProcedureCall::burn(long long amount, unsigned int contractIndexBurnedFor) const
 {
     if (amount < 0 || amount > MAX_AMOUNT)
