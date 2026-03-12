@@ -2409,3 +2409,38 @@ TEST(ContractTestEx, MinInvocationRewardInterContractCall_Exact)
     EXPECT_EQ(output.errorCode, QPI::NoCallError);
     EXPECT_EQ(output.callSucceeded, 1);
 }
+
+TEST(ContractTestEx, MinInvocationRewardDirectTransaction_Rejected)
+{
+    ContractTestingTestEx test;
+    increaseEnergy(USER1, 1000000);
+
+    // Set minimum invocation reward for SetMinInvocationReward (inputType 9 in TESTEXA)
+    test.setMinInvocationReward(9, 5000);
+    EXPECT_EQ(test.queryMinInvocationReward(TESTEXA_CONTRACT_INDEX, 9), 5000);
+
+    // Direct transaction with insufficient amount should be rejected
+    TESTEXA::SetMinInvocationReward_input input;
+    input.inputType = 8;
+    input.amount = 100;
+    TESTEXA::SetMinInvocationReward_output output;
+    bool result = test.invokeUserProcedure(TESTEXA_CONTRACT_INDEX, 9, input, output, USER1, 4999);
+    EXPECT_FALSE(result);
+}
+
+TEST(ContractTestEx, MinInvocationRewardDirectTransaction_Accepted)
+{
+    ContractTestingTestEx test;
+    increaseEnergy(USER1, 1000000);
+
+    // Set minimum invocation reward for SetMinInvocationReward (inputType 9 in TESTEXA)
+    test.setMinInvocationReward(9, 5000);
+
+    // Direct transaction with sufficient amount should succeed
+    TESTEXA::SetMinInvocationReward_input input;
+    input.inputType = 8;
+    input.amount = 100;
+    TESTEXA::SetMinInvocationReward_output output;
+    bool result = test.invokeUserProcedure(TESTEXA_CONTRACT_INDEX, 9, input, output, USER1, 5000);
+    EXPECT_TRUE(result);
+}
