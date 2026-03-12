@@ -2590,6 +2590,19 @@ static void notifyContractOfIncomingTransfer(const m256i& source, const m256i& d
 }
 
 
+// Returns true if the procedure has a minimum invocation reward set and amount is below it
+static bool checkMinInvocationReward(unsigned int contractIndex, unsigned short inputType, long long amount)
+{
+    for (unsigned int i = 0; i < MAX_MIN_INVOCATION_REWARD_ENTRIES; ++i)
+    {
+        if (contractMinInvocationRewards[contractIndex][i].inputType == 0)
+            return false;
+        if (contractMinInvocationRewards[contractIndex][i].inputType == inputType)
+            return amount < contractMinInvocationRewards[contractIndex][i].amount;
+    }
+    return false;
+}
+
 static void processTickTransactionContractIPO(const Transaction* transaction, const int spectrumIndex, const unsigned int contractIndex)
 {
     PROFILE_SCOPE();
@@ -3047,8 +3060,7 @@ static void processTickTransaction(const Transaction* transaction, unsigned int 
                             moneyFlew = false;
                         }
                         else if (contractUserProcedures[contractIndex][transaction->inputType] != nullptr
-                            && contractUserProcedureMinInvocationReward[contractIndex][transaction->inputType] > 0
-                            && transaction->amount < contractUserProcedureMinInvocationReward[contractIndex][transaction->inputType])
+                            && checkMinInvocationReward(contractIndex, transaction->inputType, transaction->amount))
                         {
                             // Transaction amount below minimum invocation reward required by procedure - refund
                             if (transaction->amount > 0)
@@ -5912,8 +5924,19 @@ static bool saveContractExecFeeFiles(CHAR16* directory, bool saveAccumulatedTime
 static bool saveMinInvocationRewardFile(CHAR16* directory)
 {
     logToConsole(L"Saving min invocation reward file...");
-    long long savedSize = save(CONTRACT_MIN_INVOC_REWARD_FILE_NAME, sizeof(contractUserProcedureMinInvocationReward), (unsigned char*)contractUserProcedureMinInvocationReward, directory);
-    if (savedSize != sizeof(contractUserProcedureMinInvocationReward))
+
+    // Copy to compact disk format (without funcPtr)
+    for (unsigned int c = 0; c < contractCount; ++c)
+    {
+        for (unsigned int i = 0; i < MAX_MIN_INVOCATION_REWARD_ENTRIES; ++i)
+        {
+            contractMinInvocationRewardsDisk[c][i].inputType = contractMinInvocationRewards[c][i].inputType;
+            contractMinInvocationRewardsDisk[c][i].amount = contractMinInvocationRewards[c][i].amount;
+        }
+    }
+
+    long long savedSize = save(CONTRACT_MIN_INVOC_REWARD_FILE_NAME, sizeof(contractMinInvocationRewardsDisk), (unsigned char*)contractMinInvocationRewardsDisk, directory);
+    if (savedSize != sizeof(contractMinInvocationRewardsDisk))
     {
         logToConsole(L"Failed to save min invocation reward file!");
         return false;
@@ -5925,16 +5948,44 @@ static bool saveMinInvocationRewardFile(CHAR16* directory)
 static bool loadMinInvocationRewardFile(CHAR16* directory)
 {
     logToConsole(L"Loading min invocation reward file...");
-    long long loadedSize = load(CONTRACT_MIN_INVOC_REWARD_FILE_NAME, sizeof(contractUserProcedureMinInvocationReward), (unsigned char*)contractUserProcedureMinInvocationReward, directory);
-    if (loadedSize != sizeof(contractUserProcedureMinInvocationReward))
+    long long loadedSize = load(CONTRACT_MIN_INVOC_REWARD_FILE_NAME, sizeof(contractMinInvocationRewardsDisk), (unsigned char*)contractMinInvocationRewardsDisk, directory);
+    if (loadedSize != sizeof(contractMinInvocationRewardsDisk))
     {
-        // Non-fatal: file may not exist yet, keep array zeroed
-        setMem(contractUserProcedureMinInvocationReward, sizeof(contractUserProcedureMinInvocationReward), 0);
+        // Non-fatal: file may not exist yet, keep arrays zeroed
+        setMem(contractMinInvocationRewards, sizeof(contractMinInvocationRewards), 0);
+        setMem(contractMinInvocationRewardsDisk, sizeof(contractMinInvocationRewardsDisk), 0);
         logToConsole(L"Min invocation reward file not found or invalid, initialized to zeros.");
         return true;
     }
+
+    // Copy from disk format to runtime format (funcPtr will be populated later by repopulateMinInvocationRewardFuncPtrs)
+    for (unsigned int c = 0; c < contractCount; ++c)
+    {
+        for (unsigned int i = 0; i < MAX_MIN_INVOCATION_REWARD_ENTRIES; ++i)
+        {
+            contractMinInvocationRewards[c][i].inputType = contractMinInvocationRewardsDisk[c][i].inputType;
+            contractMinInvocationRewards[c][i].amount = contractMinInvocationRewardsDisk[c][i].amount;
+            contractMinInvocationRewards[c][i].funcPtr = nullptr;
+        }
+    }
+
     logToConsole(L"Min invocation reward file loaded.");
     return true;
+}
+
+// Repopulate cached funcPtr fields from the procedure registration table.
+// Must be called after initializeContracts() since function pointers are only valid after registration.
+static void repopulateMinInvocationRewardFuncPtrs()
+{
+    for (unsigned int c = 0; c < contractCount; ++c)
+    {
+        for (unsigned int i = 0; i < MAX_MIN_INVOCATION_REWARD_ENTRIES; ++i)
+        {
+            if (contractMinInvocationRewards[c][i].inputType == 0)
+                break;
+            contractMinInvocationRewards[c][i].funcPtr = contractUserProcedures[c][contractMinInvocationRewards[c][i].inputType];
+        }
+    }
 }
 
 static bool saveSystem(CHAR16* directory)
@@ -6231,6 +6282,7 @@ static bool initialize()
 
     initializeContractErrors();
     initializeContracts();
+    repopulateMinInvocationRewardFuncPtrs();
 
     if (loadMiningSeedFromFile)
     {

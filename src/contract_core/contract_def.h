@@ -398,7 +398,24 @@ GLOBAL_VAR_DECL unsigned short contractUserProcedureOutputSizes[contractCount][6
 // probably due to buffer overflow that is difficult to reproduce in test net
 // TODO: change back to unsigned int
 GLOBAL_VAR_DECL unsigned short contractUserProcedureLocalsSizes[contractCount][65536];
-GLOBAL_VAR_DECL long long contractUserProcedureMinInvocationReward[contractCount][65536];
+// Dense array of minimum invocation rewards, only storing procedures that have a non-zero minimum set.
+// Scanned linearly; empty (inputType == 0) entry terminates the search.
+constexpr unsigned int MAX_MIN_INVOCATION_REWARD_ENTRIES = 64;
+struct MinInvocationRewardEntry
+{
+    long long amount;
+    USER_PROCEDURE funcPtr;    // cached for inter-contract lookup by function pointer, not persisted
+    unsigned short inputType;  // 0 = unused/end marker
+};
+GLOBAL_VAR_DECL MinInvocationRewardEntry contractMinInvocationRewards[contractCount][MAX_MIN_INVOCATION_REWARD_ENTRIES];
+
+// On-disk format: only inputType + amount, no funcPtr (which is runtime-only)
+struct MinInvocationRewardDiskEntry
+{
+    long long amount;
+    unsigned short inputType;  // 0 = unused/end marker
+};
+GLOBAL_VAR_DECL MinInvocationRewardDiskEntry contractMinInvocationRewardsDisk[contractCount][MAX_MIN_INVOCATION_REWARD_ENTRIES];
 
 enum SystemProcedureID
 {

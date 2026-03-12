@@ -171,7 +171,8 @@ static bool initContractExec()
     setMem(contractUserProcedureInputSizes, sizeof(contractUserProcedureInputSizes), 0);
     setMem(contractUserProcedureOutputSizes, sizeof(contractUserProcedureOutputSizes), 0);
     setMem(contractUserProcedureLocalsSizes, sizeof(contractUserProcedureLocalsSizes), 0);
-    setMem(contractUserProcedureMinInvocationReward, sizeof(contractUserProcedureMinInvocationReward), 0);
+    setMem(contractMinInvocationRewards, sizeof(contractMinInvocationRewards), 0);
+    setMem(contractMinInvocationRewardsDisk, sizeof(contractMinInvocationRewardsDisk), 0);
 
     for (ContractLocalsStack::SizeType i = 0; i < NUMBER_OF_CONTRACT_EXECUTION_BUFFERS; ++i)
         contractLocalsStack[i].init();
@@ -393,18 +394,15 @@ const QpiContextProcedureCall* QPI::QpiContextProcedureCall::__qpiConstructProce
     // Check if invocation reward meets the minimum required by the called procedure
     if (!skipFeeCheck && procFuncPtr)
     {
-        // Look up the inputType by scanning the procedure function pointer table
-        for (unsigned short __i = 1; __i != 0; ++__i)
+        for (unsigned int __i = 0; __i < MAX_MIN_INVOCATION_REWARD_ENTRIES; ++__i)
         {
-            if (contractUserProcedures[procContractIndex][__i] == (USER_PROCEDURE)procFuncPtr)
-            {
-                if (contractUserProcedureMinInvocationReward[procContractIndex][__i] > 0
-                    && invocationReward < contractUserProcedureMinInvocationReward[procContractIndex][__i])
-                {
-                    callError = CallErrorInsufficientInvocationReward;
-                    return nullptr;
-                }
+            if (contractMinInvocationRewards[procContractIndex][__i].inputType == 0)
                 break;
+            if (contractMinInvocationRewards[procContractIndex][__i].funcPtr == (USER_PROCEDURE)procFuncPtr
+                && invocationReward < contractMinInvocationRewards[procContractIndex][__i].amount)
+            {
+                callError = CallErrorInsufficientInvocationReward;
+                return nullptr;
             }
         }
     }

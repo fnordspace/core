@@ -113,6 +113,16 @@ public:
         }
         setMemory(output, 0);
 
+        // Check minimum invocation reward (mirrors processTickTransaction behavior)
+        for (unsigned int __i = 0; __i < MAX_MIN_INVOCATION_REWARD_ENTRIES; ++__i)
+        {
+            if (contractMinInvocationRewards[contractIndex][__i].inputType == 0)
+                break;
+            if (contractMinInvocationRewards[contractIndex][__i].inputType == procedureInputType
+                && amount < contractMinInvocationRewards[contractIndex][__i].amount)
+                return false; // rejected: amount below minimum invocation reward
+        }
+
         // transfer amount (fee / invocation reward)
         int userSpectrumIndex = spectrumIndex(user);
         if (userSpectrumIndex < 0 || !decreaseEnergy(userSpectrumIndex, amount))

@@ -98,7 +98,14 @@ long long QPI::QpiContextFunctionCall::queryMinInvocationReward(unsigned short i
     if (contractIndex < 1 || contractIndex >= contractCount)
         contractIndex = _currentContractIndex;
 
-    return contractUserProcedureMinInvocationReward[contractIndex][inputType];
+    for (unsigned int i = 0; i < MAX_MIN_INVOCATION_REWARD_ENTRIES; ++i)
+    {
+        if (contractMinInvocationRewards[contractIndex][i].inputType == 0)
+            break;
+        if (contractMinInvocationRewards[contractIndex][i].inputType == inputType)
+            return contractMinInvocationRewards[contractIndex][i].amount;
+    }
+    return 0;
 }
 
 bool QPI::QpiContextProcedureCall::setMinInvocationReward(unsigned short inputType, long long amount) const
@@ -106,8 +113,53 @@ bool QPI::QpiContextProcedureCall::setMinInvocationReward(unsigned short inputTy
     if (inputType == 0 || amount < 0)
         return false;
 
-    contractUserProcedureMinInvocationReward[_currentContractIndex][inputType] = amount;
-    return true;
+    // Verify inputType corresponds to a registered procedure
+    if (contractUserProcedures[_currentContractIndex][inputType] == nullptr)
+        return false;
+
+    // Look for existing entry to update
+    for (unsigned int i = 0; i < MAX_MIN_INVOCATION_REWARD_ENTRIES; ++i)
+    {
+        if (contractMinInvocationRewards[_currentContractIndex][i].inputType == 0)
+        {
+            // Reached end without finding existing entry; add new one
+            if (amount > 0)
+            {
+                contractMinInvocationRewards[_currentContractIndex][i].inputType = inputType;
+                contractMinInvocationRewards[_currentContractIndex][i].amount = amount;
+                contractMinInvocationRewards[_currentContractIndex][i].funcPtr = contractUserProcedures[_currentContractIndex][inputType];
+            }
+            return true;
+        }
+        if (contractMinInvocationRewards[_currentContractIndex][i].inputType == inputType)
+        {
+            if (amount > 0)
+            {
+                contractMinInvocationRewards[_currentContractIndex][i].amount = amount;
+            }
+            else
+            {
+                // amount == 0: remove entry by shifting remaining entries down
+                unsigned int j = i;
+                for (; j + 1 < MAX_MIN_INVOCATION_REWARD_ENTRIES; ++j)
+                {
+                    contractMinInvocationRewards[_currentContractIndex][j] = contractMinInvocationRewards[_currentContractIndex][j + 1];
+                    if (contractMinInvocationRewards[_currentContractIndex][j].inputType == 0)
+                        break;
+                }
+                // Zero out the last entry (handles full-table case where loop condition exits without copying a zero entry)
+                if (j + 1 >= MAX_MIN_INVOCATION_REWARD_ENTRIES)
+                {
+                    contractMinInvocationRewards[_currentContractIndex][j].inputType = 0;
+                    contractMinInvocationRewards[_currentContractIndex][j].amount = 0;
+                    contractMinInvocationRewards[_currentContractIndex][j].funcPtr = nullptr;
+                }
+            }
+            return true;
+        }
+    }
+    ASSERT(false); // MAX_MIN_INVOCATION_REWARD_ENTRIES exceeded, increase the limit
+    return false; // table full
 }
 
 long long QPI::QpiContextProcedureCall::burn(long long amount, unsigned int contractIndexBurnedFor) const
