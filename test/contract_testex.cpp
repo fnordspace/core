@@ -423,13 +423,13 @@ public:
         return output;
     }
 
-    void setMinInvocationReward(uint16 inputType, sint64 amount)
+    bool setMinInvocationReward(uint16 inputType, sint64 amount, sint64 invocationReward = 0)
     {
         TESTEXA::SetMinInvocationReward_input input;
         input.inputType = inputType;
         input.amount = amount;
         TESTEXA::SetMinInvocationReward_output output;
-        invokeUserProcedure(TESTEXA_CONTRACT_INDEX, 9, input, output, USER1, 0);
+        return invokeUserProcedure(TESTEXA_CONTRACT_INDEX, 9, input, output, USER1, invocationReward);
     }
 
     sint64 queryMinInvocationReward(uint32 contractIndex, uint16 inputType)
@@ -2420,11 +2420,7 @@ TEST(ContractTestEx, MinInvocationRewardDirectTransaction_Rejected)
     EXPECT_EQ(test.queryMinInvocationReward(TESTEXA_CONTRACT_INDEX, 9), 5000);
 
     // Direct transaction with insufficient amount should be rejected
-    TESTEXA::SetMinInvocationReward_input input;
-    input.inputType = 8;
-    input.amount = 100;
-    TESTEXA::SetMinInvocationReward_output output;
-    bool result = test.invokeUserProcedure(TESTEXA_CONTRACT_INDEX, 9, input, output, USER1, 4999);
+    bool result = test.setMinInvocationReward(8, 100, 4999);
     EXPECT_FALSE(result);
 }
 
@@ -2437,10 +2433,6 @@ TEST(ContractTestEx, MinInvocationRewardDirectTransaction_Accepted)
     test.setMinInvocationReward(9, 5000);
 
     // Direct transaction with sufficient amount should succeed
-    TESTEXA::SetMinInvocationReward_input input;
-    input.inputType = 8;
-    input.amount = 100;
-    TESTEXA::SetMinInvocationReward_output output;
-    bool result = test.invokeUserProcedure(TESTEXA_CONTRACT_INDEX, 9, input, output, USER1, 5000);
+    bool result = test.setMinInvocationReward(8, 100, 5000);
     EXPECT_TRUE(result);
 }
