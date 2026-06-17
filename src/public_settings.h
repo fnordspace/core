@@ -75,7 +75,7 @@ static_assert(AUTO_FORCE_NEXT_TICK_THRESHOLD* TARGET_TICK_DURATION >= PEER_REFRE
 
 // Epoch and initial tick for node startup
 #define EPOCH 218
-#define TICK 59330000
+#define TICK 59400000
 #define TICK_IS_FIRST_TICK_OF_EPOCH 1 // Set to 0 if the network is restarted during the EPOCH with a new initial TICK
 
 #define ARBITRATOR "AFZPUAIYVPNUYGJRQVLUKOPPVLHAZQTGLYAAUUNBXFTVTAMSBKQBLEIEPCVJ"
@@ -121,7 +121,9 @@ static constexpr long long NEURON_VALUE_LIMIT = 1LL;
 #define SOLUTION_SECURITY_DEPOSIT 1000000
 
 // Signing difficulty
-#define TARGET_TICK_VOTE_SIGNATURE 0x00095CBEU // around 7000 signing operations per ID
+#define TARGET_TICK_VOTE_SIGNATURE_LEGACY 0x00095CBEU // ~7,000 signing ops per ID
+#define TARGET_TICK_VOTE_SIGNATURE_NEW    0x000242ECU // ~28,980 ops (4.14x harder)
+#define SIGNING_DIFFICULTY_SWITCH_TICK    0xFFFFFFFFU // TODO: set to the flag-day tick
 
 // include commonly needed definitions
 #include "network_messages/common_def.h"
