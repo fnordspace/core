@@ -145,3 +145,16 @@ struct SpecialCommandGetPredictionRanking
 
 static_assert(sizeof(SpecialCommandGetPredictionRanking<1>::Entry) == 48, "SpecialCommandGetPredictionRanking::Entry unexpected size");
 static_assert(sizeof(SpecialCommandGetPredictionRanking<1>) == 16 + 48, "SpecialCommandGetPredictionRanking unexpected size");
+
+#define SPECIAL_COMMAND_SET_TICK_VOTE_SIGNATURE_TARGET 22ULL
+#define SPECIAL_COMMAND_GET_TICK_VOTE_SIGNATURE_TARGET 23ULL
+// Request of the set command (targetBeforeSwitch ignored) and response of both commands (current node setting).
+// From switchTick on, votes are signed and verified with newTarget.
+struct SpecialCommandTickVoteSignatureTargetRequestAndResponse
+{
+    unsigned long long everIncreasingNonceAndCommandType;
+    unsigned int targetBeforeSwitch;
+    unsigned int newTarget;
+    unsigned int switchTick;
+    unsigned int padding;
+};
