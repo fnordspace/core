@@ -1158,6 +1158,12 @@ static void processBroadcastComputors(Peer* peer, RequestResponseHeader* header)
 // the writer stores targetBeforeSwitch first.
 static volatile unsigned long long tickVoteSignatureSwitch = (unsigned long long)TARGET_TICK_VOTE_SIGNATURE << 32; // no pending switch
 static volatile unsigned int tickVoteSignatureTargetBeforeSwitch = TARGET_TICK_VOTE_SIGNATURE;
+struct TickVoteSignatureSnapshot
+{
+    unsigned long long tickVoteSignatureSwitch;
+    unsigned int tickVoteSignatureTargetBeforeSwitch;
+    unsigned int padding;
+};
 
 // Signing target for a vote on the given tick
 static unsigned int getTargetTickVoteSignature(unsigned int tick)
@@ -5538,6 +5544,15 @@ static bool saveAllNodeStates()
         return false;
     }
 
+    CHAR16 TICK_VOTE_SIGNATURE_FILE_NAME[] = L"snapshotTickVoteSignature";
+    TickVoteSignatureSnapshot tickVoteSignatureSnapshot = { tickVoteSignatureSwitch, tickVoteSignatureTargetBeforeSwitch, 0 };
+    savedSize = save(TICK_VOTE_SIGNATURE_FILE_NAME, sizeof(tickVoteSignatureSnapshot), (unsigned char*)&tickVoteSignatureSnapshot, directory);
+    if (savedSize != sizeof(tickVoteSignatureSnapshot))
+    {
+        logToConsole(L"Failed to save tick vote signature target");
+        return false;
+    }
+
     // Save per-tick TX counts for offline revenue analysis (recorded during processTick)
     REVENUE_DATA_SNAPSHOT_FILE_NAME[sizeof(REVENUE_DATA_SNAPSHOT_FILE_NAME) / sizeof(REVENUE_DATA_SNAPSHOT_FILE_NAME[0]) - 4] = system.epoch / 100 + L'0';
     REVENUE_DATA_SNAPSHOT_FILE_NAME[sizeof(REVENUE_DATA_SNAPSHOT_FILE_NAME) / sizeof(REVENUE_DATA_SNAPSHOT_FILE_NAME[0]) - 3] = (system.epoch % 100) / 10 + L'0';
@@ -5757,6 +5772,16 @@ static bool loadAllNodeStates()
     loadMiningSeedFromFile = true;
     voteCounter.loadAllDataFromArray(nodeStateBuffer.voteCounterData);
     gDogeMiningSharesCounter.loadAllDataFromArray(nodeStateBuffer.dogeMiningSharesCounterData);
+
+    // Optional: snapshots without this file keep the compiled target
+    CHAR16 TICK_VOTE_SIGNATURE_FILE_NAME[] = L"snapshotTickVoteSignature";
+    TickVoteSignatureSnapshot tickVoteSignatureSnapshot;
+    if (getFileSize(TICK_VOTE_SIGNATURE_FILE_NAME, directory) == sizeof(tickVoteSignatureSnapshot)
+        && load(TICK_VOTE_SIGNATURE_FILE_NAME, sizeof(tickVoteSignatureSnapshot), (unsigned char*)&tickVoteSignatureSnapshot, directory) == sizeof(tickVoteSignatureSnapshot))
+    {
+        tickVoteSignatureTargetBeforeSwitch = tickVoteSignatureSnapshot.tickVoteSignatureTargetBeforeSwitch;
+        tickVoteSignatureSwitch = tickVoteSignatureSnapshot.tickVoteSignatureSwitch;
+    }
 
     // Load per-tick TX counts for offline revenue analysis
     REVENUE_DATA_SNAPSHOT_FILE_NAME[sizeof(REVENUE_DATA_SNAPSHOT_FILE_NAME) / sizeof(REVENUE_DATA_SNAPSHOT_FILE_NAME[0]) - 4] = system.epoch / 100 + L'0';
