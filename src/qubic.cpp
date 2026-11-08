@@ -1153,10 +1153,17 @@ static void processBroadcastComputors(Peer* peer, RequestResponseHeader* header)
     }
 }
 
+// Tick vote signing target, changeable by SPECIAL_COMMAND_SET_TICK_VOTE_SIGNATURE_TARGET.
+// newTarget (high 32 bits) and switchTick (low 32 bits) are packed so readers never mix two set commands;
+// the writer stores targetBeforeSwitch first.
+static volatile unsigned long long tickVoteSignatureSwitch = (unsigned long long)TARGET_TICK_VOTE_SIGNATURE << 32; // no pending switch
+static volatile unsigned int tickVoteSignatureTargetBeforeSwitch = TARGET_TICK_VOTE_SIGNATURE;
+
 // Signing target for a vote on the given tick
 static unsigned int getTargetTickVoteSignature(unsigned int tick)
 {
-    return TARGET_TICK_VOTE_SIGNATURE;
+    const unsigned long long sw = tickVoteSignatureSwitch;
+    return (tick >= (unsigned int)sw) ? (unsigned int)(sw >> 32) : tickVoteSignatureTargetBeforeSwitch;
 }
 
 static bool verifyTickVoteSignature(const unsigned char* publicKey, const unsigned char* messageDigest, const unsigned char* signature, const unsigned int tick, const bool curveVerify = true)
@@ -2394,6 +2401,30 @@ static void processSpecialCommand(Peer* peer, RequestResponseHeader* header)
                 response.multiplierNumerator = executionTimeMultiplierNumerator;
                 response.multiplierDenominator = executionTimeMultiplierDenominator;
                 enqueueResponse(peer, sizeof(SpecialCommandExecutionFeeMultiplierRequestAndResponse), SpecialCommand::type(), header->dejavu(), &response);
+            }
+            break;
+
+            case SPECIAL_COMMAND_SET_TICK_VOTE_SIGNATURE_TARGET:
+            case SPECIAL_COMMAND_GET_TICK_VOTE_SIGNATURE_TARGET:
+            {
+                const auto* _request = header->getPayload<SpecialCommandTickVoteSignatureTargetRequestAndResponse>();
+                if ((request->everIncreasingNonceAndCommandType >> 56) == SPECIAL_COMMAND_SET_TICK_VOTE_SIGNATURE_TARGET
+                    && header->size() >= sizeof(RequestResponseHeader) + sizeof(SpecialCommandTickVoteSignatureTargetRequestAndResponse) + SIGNATURE_SIZE
+                    && _request->newTarget >= MIN_TARGET_TICK_VOTE_SIGNATURE && _request->newTarget <= MAX_TARGET_TICK_VOTE_SIGNATURE
+                    && _request->switchTick >= system.tick + MIN_TICK_VOTE_SIGNATURE_SWITCH_DELAY)
+                {
+                    // Replaces a switch that is not reached yet
+                    tickVoteSignatureTargetBeforeSwitch = getTargetTickVoteSignature(system.tick);
+                    tickVoteSignatureSwitch = ((unsigned long long)_request->newTarget << 32) | _request->switchTick;
+                }
+                SpecialCommandTickVoteSignatureTargetRequestAndResponse response;
+                response.everIncreasingNonceAndCommandType = request->everIncreasingNonceAndCommandType;
+                const unsigned long long sw = tickVoteSignatureSwitch;
+                response.targetBeforeSwitch = tickVoteSignatureTargetBeforeSwitch;
+                response.newTarget = (unsigned int)(sw >> 32);
+                response.switchTick = (unsigned int)sw;
+                response.padding = 0;
+                enqueueResponse(peer, sizeof(SpecialCommandTickVoteSignatureTargetRequestAndResponse), SpecialCommand::type(), header->dejavu(), &response);
             }
             break;
 
