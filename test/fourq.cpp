@@ -3,6 +3,22 @@
 #include "gtest/gtest.h"
 
 #include "../src/platform/memory.h"
+
+#include <lib/platform_common/qintrin.h>
+
+// RDRAND stub for the vote-nonce tests: -1 = real RDRAND, 0 = always fail, 1 = succeed with a constant.
+// fakeRdrandFailsLeft makes the next N calls fail before the mode applies.
+static int fakeRdrandMode = -1;
+static int fakeRdrandFailsLeft = 0;
+static int fakeRdrand64(unsigned long long* v)
+{
+    if (fakeRdrandFailsLeft > 0) { fakeRdrandFailsLeft--; *v = 0; return 0; }
+    if (fakeRdrandMode < 0) return _rdrand64_step(v);
+    *v = fakeRdrandMode ? 0x0123456789ABCDEFULL : 0;
+    return fakeRdrandMode;
+}
+#define FOURQ_RDRAND64_STEP fakeRdrand64
+
 #include "../src/four_q.h"
 #include "utils.h"
 
@@ -718,4 +734,48 @@ TEST(TestFourQ, SignTickVoteIncrementalPassesVerify)
         EXPECT_TRUE(verify(publicKey, m2, s2));
         EXPECT_LE(_byteswap_ulong(((unsigned int*)s2)[0]), TARGET_TICK_VOTE_SIGNATURE);
     }
+}
+// With broken RDRAND (constant or failing) the vote nonce must still depend on the secret key; otherwise
+// the nonce base is computable from public data and one published vote reveals the private key.
+TEST(TestFourQ, SignTickVoteNonceSecretWithBrokenRdrand)
+{
+#if defined (__AVX512F__)
+    initAVX512FourQConstants();
+#endif
+    initIncrementalSignG();
+
+    constexpr unsigned int TARGET_TICK_VOTE_SIGNATURE = 0x07FFFFFFU;
+    unsigned char subseedA[32], subseedB[32], pubA[32], pubB[32], priv[32], msg[32];
+    for (int i = 0; i < 32; i++) { subseedA[i] = (unsigned char)(0x11 + i); subseedB[i] = (unsigned char)(0x77 + i); msg[i] = (unsigned char)(0x3C ^ i); }
+    getPrivateKey(subseedA, priv); getPublicKey(priv, pubA);
+    getPrivateKey(subseedB, priv); getPublicKey(priv, pubB);
+
+    for (int mode = 0; mode <= 1; mode++)
+    {
+        fakeRdrandMode = mode;
+        unsigned char sigA[64], sigB[64], sigA2[64];
+        signWithRandomK_incremental(subseedA, pubA, msg, sigA, TARGET_TICK_VOTE_SIGNATURE);
+        signWithRandomK_incremental(subseedB, pubB, msg, sigB, TARGET_TICK_VOTE_SIGNATURE);
+        EXPECT_TRUE(verify(pubA, msg, sigA)) << "mode " << mode;
+        EXPECT_TRUE(verify(pubB, msg, sigB)) << "mode " << mode;
+        // Same R for different keys means the nonce does not depend on the key.
+        EXPECT_NE(memcmp(sigA, sigB, 32), 0) << "mode " << mode;
+
+        signWithRandomK(subseedA, pubA, msg, sigA2);
+        EXPECT_TRUE(verify(pubA, msg, sigA2)) << "mode " << mode;
+        signWithRandomK(subseedB, pubB, msg, sigB);
+        EXPECT_NE(memcmp(sigA2, sigB, 32), 0) << "mode " << mode;
+    }
+
+    // A transient RDRAND failure is retried: same result as RDRAND succeeding right away.
+    fakeRdrandMode = 1;
+    unsigned char sigOk[64], sigRetried[64];
+    signWithRandomK_incremental(subseedA, pubA, msg, sigOk, TARGET_TICK_VOTE_SIGNATURE);
+    fakeRdrandFailsLeft = 3;
+    signWithRandomK_incremental(subseedA, pubA, msg, sigRetried, TARGET_TICK_VOTE_SIGNATURE);
+    EXPECT_EQ(fakeRdrandFailsLeft, 0);
+    EXPECT_EQ(memcmp(sigOk, sigRetried, 64), 0);
+
+    fakeRdrandMode = -1;
+    fakeRdrandFailsLeft = 0;
 }
