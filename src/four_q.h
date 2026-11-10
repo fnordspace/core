@@ -1927,6 +1927,74 @@ static void initIncrementalSignG()
     R1_to_R2(Gext, gIncrSignG);
 }
 
+// Old per-attempt search: returns the first offset i with encode(R + i*G) meeting target (or where done was seen),
+// leaving encode(R + i*G) in signature[0..32]. R is advanced to R + i*G.
+static unsigned long long incrSignSearchSerial(point_extproj_t Rext, unsigned char* signature, unsigned int target, volatile int* done)
+{
+    unsigned long long offset = 0;
+    while (!done || !*done)
+    {
+        point_extproj_t cpy; copyMem(cpy, Rext, sizeof(point_extproj_t));    // eccnorm mutates z -> work on a copy
+        point_t Raff; eccnorm(cpy, Raff); encode(Raff, signature);
+        if (_byteswap_ulong(((unsigned int*)signature)[0]) <= target) break;
+        eccadd(gIncrSignG, Rext); offset++;
+    }
+    return offset;
+}
+
+static constexpr unsigned int INCR_SIGN_BATCH = 64;
+
+// scores[i] = PoW score of R + i*G, i.e. _byteswap_ulong of the low 32 bits of encode(.), which are the low bits of
+// the affine Re(y) = Re(Y/Z) = (y0*z0 + y1*z1) / (z0^2 + z1^2) (i^2 = -1). One Fp inversion per batch
+// (Montgomery trick over the norms). R is advanced by INCR_SIGN_BATCH*G.
+static void incrSignBatchScores(point_extproj_t R, unsigned int* scores)
+{
+    felm_t num[INCR_SIGN_BATCH], norm[INCR_SIGN_BATCH], prefix[INCR_SIGN_BATCH], t, inv;
+    for (unsigned int i = 0; i < INCR_SIGN_BATCH; i++)
+    {
+        fpmul1271(R->y[0], R->z[0], num[i]); fpmul1271(R->y[1], R->z[1], t); fpadd1271(num[i], t, num[i]);
+        fpsqr1271(R->z[0], norm[i]); fpsqr1271(R->z[1], t); fpadd1271(norm[i], t, norm[i]);
+        if (i) fpmul1271(prefix[i - 1], norm[i], prefix[i]); else copyMem(prefix[0], norm[0], sizeof(felm_t));
+        eccadd(gIncrSignG, R);
+    }
+    fpexp1251(prefix[INCR_SIGN_BATCH - 1], t);                              // inv = prefix^(p-2), as in eccnorm
+    fpsqr1271(t, t); fpsqr1271(t, t); fpmul1271(prefix[INCR_SIGN_BATCH - 1], t, inv);
+    for (unsigned int i = INCR_SIGN_BATCH - 1; ; i--)                       // invariant: inv = 1/prefix[i]
+    {
+        if (i) fpmul1271(inv, prefix[i - 1], t); else copyMem(t, inv, sizeof(felm_t)); // t = 1/norm[i]
+        fpmul1271(num[i], t, t); mod1271(t);
+        scores[i] = _byteswap_ulong((unsigned int)t[0]);
+        if (!i) break;
+        fpmul1271(inv, norm[i], inv);
+    }
+}
+
+// Same result as incrSignSearchSerial (offset, signature[0..32], R) when no done is seen; done is checked once per batch.
+// On a done-bail signature[0..32] is not written.
+static unsigned long long incrSignSearchBatch(point_extproj_t Rext, unsigned char* signature, unsigned int target, volatile int* done)
+{
+    unsigned long long offset = 0;
+    while (!done || !*done)
+    {
+        point_extproj_t start; copyMem(start, Rext, sizeof(point_extproj_t));
+        unsigned int scores[INCR_SIGN_BATCH];
+        incrSignBatchScores(Rext, scores);
+        for (unsigned int i = 0; i < INCR_SIGN_BATCH; i++)
+        {
+            if (scores[i] <= target)
+            {
+                for (unsigned int j = 0; j < i; j++) eccadd(gIncrSignG, start);
+                copyMem(Rext, start, sizeof(point_extproj_t));
+                point_t Raff; eccnorm(start, Raff); encode(Raff, signature);
+                return offset + i;
+            }
+        }
+        offset += INCR_SIGN_BATCH;
+    }
+    return offset;
+}
+
+template <bool batched = false>
 static void signWithRandomK_incremental(const unsigned char* subseed, const unsigned char* publicKey, const unsigned char* messageDigest, unsigned char* signature, unsigned int target, volatile int* done = nullptr)
 {
     unsigned char kConst[64];
@@ -1935,14 +2003,8 @@ static void signWithRandomK_incremental(const unsigned char* subseed, const unsi
     signRandomNonceBase(kConst, messageDigest, base);
     point_t R0aff; ecc_mul_fixed(base, R0aff);                               // R0 = base * G (one full mul)
     point_extproj_t Rext; point_setup(R0aff, Rext);
-    unsigned long long offset = 0;
-    while (!done || !*done)                                                  // R_i = R0 + offset * G
-    {
-        point_extproj_t cpy; copyMem(cpy, Rext, sizeof(point_extproj_t));    // eccnorm mutates z -> work on a copy
-        point_t Raff; eccnorm(cpy, Raff); encode(Raff, signature);           // signature[0..32] = encode(R_i)
-        if (_byteswap_ulong(((unsigned int*)signature)[0]) <= target) break; // break loop if PoW target met
-        eccadd(gIncrSignG, Rext); offset++;                                  // Rext += G  -> R_{i+1}
-    }
+    unsigned long long offset = batched ? incrSignSearchBatch(Rext, signature, target, done)
+                                        : incrSignSearchSerial(Rext, signature, target, done);
     unsigned long long r[8]; copyMem(r, base, sizeof(r));                    // winning nonce r = base + offset
     unsigned long long carry = offset;
     for (int j = 0; j < 8 && carry; j++) { unsigned long long old = r[j]; r[j] += carry; carry = (r[j] < old) ? 1ull : 0ull; }

@@ -25,7 +25,9 @@ static int fakeRdrand64(unsigned long long* v)
 #include <lib/platform_common/qintrin.h>
 
 #include <chrono>
+#include <cstring>
 #include <iostream>
+#include <thread>
 
 static constexpr int ID_SIZE = 61;
 static inline void getIDChar(const unsigned char* key, char* identity, bool isLowerCase)
@@ -778,4 +780,123 @@ TEST(TestFourQ, SignTickVoteNonceSecretWithBrokenRdrand)
 
     fakeRdrandMode = -1;
     fakeRdrandFailsLeft = 0;
+}
+
+static void incrSignTestInit()
+{
+#if defined (__AVX512F__)
+    initAVX512FourQConstants();
+#endif
+    initIncrementalSignG();
+}
+
+static void incrSignPointFromBase(const unsigned long long* base, point_extproj_t R)
+{
+    unsigned long long b[8]; copyMem(b, base, sizeof(b));
+    point_t a; ecc_mul_fixed(b, a); point_setup(a, R);
+}
+
+static unsigned int incrSignScore(point_extproj_t R)
+{
+    point_extproj_t c; copyMem(c, R, sizeof(c));
+    point_t a; eccnorm(c, a);
+    unsigned char e[32]; encode(a, e);
+    return _byteswap_ulong(((unsigned int*)e)[0]);
+}
+
+TEST(TestFourQ, SignTickVoteBatchScoresMatchEccnorm)
+{
+    incrSignTestInit();
+    unsigned long long base[8];
+    for (int s = 0; s < 8; s++) base[s] = 0x9E3779B97F4A7C15ull * (s + 1);
+    for (int it = 0; it < 50; it++)
+    {
+        base[0] += it * 1000003;
+        point_extproj_t R, Rs; incrSignPointFromBase(base, R); copyMem(Rs, R, sizeof(R));
+        for (int b = 0; b < 3; b++)
+        {
+            unsigned int scores[INCR_SIGN_BATCH];
+            incrSignBatchScores(R, scores);
+            for (unsigned int i = 0; i < INCR_SIGN_BATCH; i++)
+            {
+                EXPECT_EQ(scores[i], incrSignScore(Rs)) << " it " << it << " batch " << b << " i " << i;
+                eccadd(gIncrSignG, Rs);
+            }
+            EXPECT_EQ(memcmp(R, Rs, sizeof(R)), 0);
+        }
+    }
+}
+
+// Same base -> same winning offset, encode(R) and R as the serial search, with the hit placed at
+// batch positions 0, 1, 63 and the boundaries of the 2nd and 3rd batch.
+TEST(TestFourQ, SignTickVoteBatchSearchMatchesSerial)
+{
+    incrSignTestInit();
+    constexpr unsigned int target = 0x003FFFFF;
+    unsigned long long base[8];
+    for (int s = 0; s < 8; s++) base[s] = 0xD1B54A32D192ED03ull * (s + 3);
+    int runs = 0;
+    for (int it = 0; it < 200 && runs < 20; it++)
+    {
+        base[1] += it + 1;
+        point_extproj_t R0, R; incrSignPointFromBase(base, R0); copyMem(R, R0, sizeof(R));
+        unsigned char sig[64];
+        const unsigned long long hit = incrSignSearchSerial(R, sig, target, nullptr);
+        if (hit < 2 * INCR_SIGN_BATCH) continue;
+        runs++;
+        for (unsigned long long delta : {0ull, 1ull, 63ull, 64ull, 65ull, 127ull, 128ull})
+        {
+            point_extproj_t A, B; copyMem(A, R0, sizeof(A));
+            for (unsigned long long j = 0; j < hit - delta; j++) eccadd(gIncrSignG, A);
+            copyMem(B, A, sizeof(B));
+            unsigned char sa[64], sb[64];
+            const unsigned long long oa = incrSignSearchSerial(A, sa, target, nullptr);
+            const unsigned long long ob = incrSignSearchBatch(B, sb, target, nullptr);
+            EXPECT_EQ(oa, delta);
+            EXPECT_EQ(ob, oa) << " delta " << delta;
+            EXPECT_EQ(memcmp(sa, sb, 32), 0) << " delta " << delta;
+            EXPECT_EQ(memcmp(A, B, sizeof(A)), 0) << " delta " << delta;
+        }
+    }
+    EXPECT_EQ(runs, 20);
+}
+
+TEST(TestFourQ, SignTickVoteBatchSearchBailsOnDone)
+{
+    incrSignTestInit();
+    unsigned long long base[8] = { 1, 2, 3, 4, 5, 6, 7, 8 };
+    unsigned char sig[64];
+    {
+        volatile int done = 1;
+        point_extproj_t R; incrSignPointFromBase(base, R);
+        EXPECT_EQ(incrSignSearchBatch(R, sig, 0, &done), 0ull);
+    }
+    {
+        // another racer finishes mid-search; target 0 practically never hits
+        volatile int done = 0;
+        point_extproj_t R; incrSignPointFromBase(base, R);
+        std::thread racer([&] { std::this_thread::sleep_for(std::chrono::milliseconds(20)); done = 1; });
+        const unsigned long long offset = incrSignSearchBatch(R, sig, 0, &done);
+        racer.join();
+        EXPECT_GT(offset, 0ull);
+        EXPECT_EQ(offset % INCR_SIGN_BATCH, 0ull);
+    }
+}
+
+TEST(TestFourQ, SignTickVoteBatchedPassesVerify)
+{
+    incrSignTestInit();
+    unsigned char subseed[32], privateKey[32], publicKey[32], msg[32];
+    for (int i = 0; i < 32; i++) { subseed[i] = (unsigned char)(0x5A + i); msg[i] = (unsigned char)(0xA5 - i); }
+    getPrivateKey(subseed, privateKey);
+    getPublicKey(privateKey, publicKey);
+    constexpr unsigned int target = 0x07FFFFFFU;
+    for (int it = 0; it < 100; it++)
+    {
+        unsigned char m2[32], s2[64];
+        for (int i = 0; i < 32; i++) m2[i] = (unsigned char)(msg[i] ^ (unsigned char)(it * 7 + i));
+        signWithRandomK_incremental<true>(subseed, publicKey, m2, s2, target);
+        EXPECT_TRUE(verify(publicKey, m2, s2));
+        EXPECT_LE(_byteswap_ulong(((unsigned int*)s2)[0]), target);
+    }
 }

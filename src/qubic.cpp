@@ -6240,7 +6240,7 @@ static void signTickVote(const unsigned char* subseed, const unsigned char* publ
 {
     PROFILE_SCOPE();
 
-    signWithRandomK_incremental(subseed, publicKey, messageDigest, signature, TARGET_TICK_VOTE_SIGNATURE);
+    signWithRandomK_incremental<USE_BATCH_INVERSION_SIGN_VOTES>(subseed, publicKey, messageDigest, signature, TARGET_TICK_VOTE_SIGNATURE);
     return;
 }
 
@@ -6257,7 +6257,7 @@ static bool signTickVoteRacing(const unsigned char* subseed, const unsigned char
     PROFILE_SCOPE();
 
     if (*done) return false; // skip starting if another core already won
-    signWithRandomK_incremental(subseed, publicKey, messageDigest, outSig, TARGET_TICK_VOTE_SIGNATURE, done);
+    signWithRandomK_incremental<USE_BATCH_INVERSION_SIGN_VOTES>(subseed, publicKey, messageDigest, outSig, TARGET_TICK_VOTE_SIGNATURE, done);
     return true;
 }
 #endif
