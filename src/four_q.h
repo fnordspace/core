@@ -1835,7 +1835,26 @@ static void sign(const unsigned char* subseed, const unsigned char* publicKey, c
     }
 }
 
-// same as sign() but here k is completely random instead of deriving from subseed
+#ifndef FOURQ_RDRAND64_STEP
+#define FOURQ_RDRAND64_STEP _rdrand64_step
+#endif
+
+// Nonce base = K12(k[32..64] || RDRAND || messageDigest), k = K12(subseed, 64). The secret half of k keeps the
+// nonce unpredictable even if RDRAND fails or is predictable; with RDRAND fully failing it degrades to sign()'s
+// deterministic per-(key, message) nonce, which is still safe.
+static void signRandomNonceBase(const unsigned char* k, const unsigned char* messageDigest, unsigned long long* base)
+{
+    unsigned char in[96];
+    *((m256i*)in) = *((m256i*)(k + 32));
+    for (int j = 32; j < 64; j += 8)
+    {
+        for (int retry = 0; retry < 10 && !FOURQ_RDRAND64_STEP((unsigned long long*)(in + j)); retry++);
+    }
+    *((m256i*)(in + 64)) = *((m256i*)messageDigest);
+    KangarooTwelve(in, 96, (unsigned char*)base, 64);
+}
+
+// same as sign() but the nonce also mixes in RDRAND output (see signRandomNonceBase)
 static void signWithRandomK(const unsigned char* subseed, const unsigned char* publicKey, const unsigned char* messageDigest, unsigned char* signature)
 { // SchnorrQ signature generation
   // It produces the signature signature of a message messageDigest of size 32 in bytes
@@ -1844,17 +1863,9 @@ static void signWithRandomK(const unsigned char* subseed, const unsigned char* p
     point_t R;
     unsigned char k[64], h[64], temp[32 + 64];
     unsigned long long r[8];
-    KangarooTwelve((unsigned char*)subseed, 32, k, 32);
-    for (int i = 32; i < 64; i += 8)
-    {
-        _rdrand64_step((unsigned long long*)(k + i));
-    }
-    // NOTE: the nonce consists 2 parts: random K and message digest
-    // This nonce is supposed to be random to avoid key leakage.
-    *((__m256i*)(temp + 32)) = *((__m256i*)(k + 32));
+    KangarooTwelve((unsigned char*)subseed, 32, k, 64);
+    signRandomNonceBase(k, messageDigest, r);
     *((__m256i*)(temp + 64)) = *((__m256i*)messageDigest);
-
-    KangarooTwelve(temp + 32, 32 + 32, (unsigned char*)r, 64);
 
     ecc_mul_fixed(r, R);
     encode(R, signature); // Encode lowest 32 bytes of signature
@@ -1878,7 +1889,7 @@ static void signWithRandomK(const unsigned char* subseed, const unsigned char* p
 
 // Completes the second half of the signature[32..64]. Since the vote signing PoW only checks the first half
 // of the signature[0..32], the second half only needs to be computed once using the r that passed the PoW check. 
-// kConst is K12(subseed,32); r is the winning rOut (consumed, modified in place exactly as signWithRandomK does);
+// kConst is K12(subseed) (first 32 bytes used); r is the winning rOut (consumed, modified in place exactly as signWithRandomK does);
 // signature[0..32] = the winning encode(R); messageDigest is the same digest passed to signWithRandomK_incremental.
 static void signWithRandomK_finishHalf(const unsigned char* kConst, const unsigned char* publicKey, const unsigned char* messageDigest, unsigned long long* r, unsigned char* signature)
 {
@@ -1918,13 +1929,10 @@ static void initIncrementalSignG()
 
 static void signWithRandomK_incremental(const unsigned char* subseed, const unsigned char* publicKey, const unsigned char* messageDigest, unsigned char* signature, unsigned int target, volatile int* done = nullptr)
 {
-    unsigned char kConst[32];
-    KangarooTwelve((unsigned char*)subseed, 32, kConst, 32);
-    unsigned char rndKAndMsg[64];                                            // r0 = K12(randomK || msg)
-    for (int j = 0; j < 32; j += 8) _rdrand64_step((unsigned long long*)(rndKAndMsg + j));
-    *((m256i*)(rndKAndMsg + 32)) = *((m256i*)messageDigest);
+    unsigned char kConst[64];
+    KangarooTwelve((unsigned char*)subseed, 32, kConst, 64);
     unsigned long long base[8];
-    KangarooTwelve(rndKAndMsg, 64, (unsigned char*)base, 64);
+    signRandomNonceBase(kConst, messageDigest, base);
     point_t R0aff; ecc_mul_fixed(base, R0aff);                               // R0 = base * G (one full mul)
     point_extproj_t Rext; point_setup(R0aff, Rext);
     unsigned long long offset = 0;
