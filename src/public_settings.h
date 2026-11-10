@@ -34,6 +34,11 @@
 // The tick duration used for timing and scheduling logic.
 #define TARGET_TICK_DURATION 1000
 
+// Minimum time between this node's tick advance and the broadcast of its tick votes.
+// Not consensus-relevant: it paces the network once >= NUMBER_OF_COMPUTORS - QUORUM + 1 computors use it,
+// because no node can reach QUORUM aligned votes before then.
+#define MIN_TICK_VOTE_DELAY_MS 350ULL
+
 // The tick duration used to calculate the size of memory buffers.
 // This determines the memory footprint of the application.
 #define TICK_DURATION_FOR_ALLOCATION_MS 225

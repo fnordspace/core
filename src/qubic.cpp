@@ -6787,7 +6787,8 @@ static void tickProcessor(void*)
                     }
 
 
-                    if (system.tick > system.latestCreatedTick || system.tick == system.initialTick)
+                    if ((system.tick > system.latestCreatedTick || system.tick == system.initialTick)
+                        && __rdtsc() - tickTicks[sizeof(tickTicks) / sizeof(tickTicks[0]) - 1] >= MIN_TICK_VOTE_DELAY_MS * frequency / 1000)
                     {
                         if (isMainMode())
                         {
