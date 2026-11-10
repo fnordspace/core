@@ -44,7 +44,7 @@ static const unsigned char ocMachineIPs[][4] = {
 #define ENABLE_QUBIC_LOGGING_EVENT 0 // turn on logging events
 
 #define USE_PARALLEL_SIGN_VOTES 1
-#define USE_BATCH_INVERSION_SIGN_VOTES 0 // tick-vote PoW search with one field inversion per batch of attempts
+#define USE_BATCH_INVERSION_SIGN_VOTES 1 // tick-vote PoW search with one field inversion per batch of attempts
 #define USE_PARALLEL_K12_LEAVES 1 // hash the leaves of large contract states on the request processors
 
 // Virtual memory settings for logging
