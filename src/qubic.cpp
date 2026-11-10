@@ -6258,7 +6258,7 @@ static bool signTickVoteRacing(const unsigned char* subseed, const unsigned char
 
     if (*done) return false; // skip starting if another core already won
     signWithRandomK_incremental<USE_BATCH_INVERSION_SIGN_VOTES>(subseed, publicKey, messageDigest, outSig, TARGET_TICK_VOTE_SIGNATURE, done);
-    return true;
+    return !*done; // a bail leaves outSig invalid
 }
 #endif
 
