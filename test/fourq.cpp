@@ -719,7 +719,7 @@ TEST(TestFourQ, SignTickVoteIncrementalPassesVerify)
     initAVX512FourQConstants();
 #endif
 
-    initIncrementalSignG();  // build G's eccadd-precomp once (needs FourQ constants above)
+    initIncrementalSignG();  // build the j*G table once (needs FourQ constants above)
 
     unsigned char subseed[32], privateKey[32], publicKey[32], msg[32];
     for (int i = 0; i < 32; i++) { subseed[i] = (unsigned char)(0x5A + i); msg[i] = (unsigned char)(0xA5 - i); }
@@ -795,33 +795,31 @@ static void incrSignTestInit()
     initIncrementalSignG();
 }
 
-static void incrSignPointFromBase(const unsigned long long* base, point_extproj_t R)
-{
-    unsigned long long b[8]; copyMem(b, base, sizeof(b));
-    point_t a; ecc_mul_fixed(b, a); point_setup(a, R);
-}
-
-TEST(TestFourQ, SignTickVoteBatchYMatchesEccnorm)
+// Every y of 3 consecutive batches equals the y of ecc_mul_fixed(scalar), and the stepped center is exact.
+TEST(TestFourQ, SignTickVoteBatchYMatchesEccMulFixed)
 {
     incrSignTestInit();
-    unsigned long long base[8];
-    for (int s = 0; s < 8; s++) base[s] = 0x9E3779B97F4A7C15ull * (s + 1);
-    for (int it = 0; it < 50; it++)
+    unsigned long long center[8] = { 0x1234567800000000ull, 0, 0, 0, 0, 0, 0, 0 };
+    for (int s = 1; s < 4; s++) center[s] = 0x9E3779B97F4A7C15ull * (s + 1) >> 12; // below the curve order, no reduction
+    for (int it = 0; it < 10; it++)
     {
-        base[0] += it * 1000003;
-        point_extproj_t R, Rs; incrSignPointFromBase(base, R); copyMem(Rs, R, sizeof(R));
+        center[1] += it * 1000003 + 1;
+        unsigned long long k[8]; copyMem(k, center, sizeof(k));
+        point_t C; ecc_mul_fixed(k, C);
         for (int b = 0; b < 3; b++)
         {
-            f2elm_t y[INCR_SIGN_BATCH];
-            incrSignBatchY(R, y);
+            static f2elm_t y[INCR_SIGN_BATCH];
+            incrSignBatchY(C, y);
             for (unsigned int i = 0; i < INCR_SIGN_BATCH; i++)
             {
-                point_extproj_t c; copyMem(c, Rs, sizeof(c));
-                point_t a; eccnorm(c, a);
+                copyMem(k, center, sizeof(k)); k[0] += (unsigned long long)b * INCR_SIGN_BATCH + i - INCR_SIGN_H;
+                point_t a; ecc_mul_fixed(k, a);
                 EXPECT_EQ(memcmp(y[i], a->y, sizeof(f2elm_t)), 0) << " it " << it << " batch " << b << " i " << i;
-                eccadd(gIncrSignG, Rs);
             }
-            EXPECT_EQ(memcmp(R, Rs, sizeof(R)), 0);
+            copyMem(k, center, sizeof(k)); k[0] += (unsigned long long)(b + 1) * INCR_SIGN_BATCH;
+            point_t a; ecc_mul_fixed(k, a);
+            mod1271(C->x[0]); mod1271(C->x[1]); mod1271(C->y[0]); mod1271(C->y[1]);
+            EXPECT_EQ(memcmp(C, a, sizeof(point_t)), 0) << " it " << it << " batch " << b;
         }
     }
 }
