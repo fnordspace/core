@@ -855,8 +855,9 @@ TEST(TestFourQ, SignTickVoteFastSMatchesFinishHalf)
             unsigned long long r[8] = { nonce[neg][0], nonce[neg][1], nonce[neg][2], nonce[neg][3], 0, 0, 0, 0 };
             point_t R; ecc_mul_fixed(r, R); encode(R, encoded[neg]);
             copyMem(rpm, encoded[neg], 32);
-            unsigned long long s[4];
-            incrSignS(kR, nonce[neg], rpm, s);
+            unsigned long long s[4], h[8];
+            KangarooTwelve(rpm, 96, h, 64);
+            incrSignS(kR, nonce[neg], h, s);
             unsigned char signature[64];
             copyMem(signature, encoded[neg], 32);
             signWithRandomK_finishHalf(kConst, publicKey, rpm + 64, r, signature);
@@ -865,6 +866,30 @@ TEST(TestFourQ, SignTickVoteFastSMatchesFinishHalf)
         }
         encoded[0][31] ^= 0x80;
         EXPECT_EQ(memcmp(encoded[0], encoded[1], 32), 0) << " it " << it;
+    }
+}
+
+// Every lane of the K12 lane hash equals KangarooTwelve of that lane's 96-byte input.
+TEST(TestFourQ, SignTickVoteK12LanesMatchKangarooTwelve)
+{
+    unsigned long long in[12][K12_LANES], out[4][K12_LANES];
+    for (int it = 0; it < 20; it++)
+    {
+        unsigned char input[K12_LANES][96];
+        for (unsigned int l = 0; l < K12_LANES; l++)
+        {
+            unsigned char seed[2] = { (unsigned char)it, (unsigned char)l };
+            KangarooTwelve(seed, 2, input[l], 96);
+            if (it == 0) setMem(input[l], 96, (unsigned char)(l ? 0xFF : 0));
+            for (int w = 0; w < 12; w++) copyMem(&in[w][l], input[l] + 8 * w, 8);
+        }
+        KangarooTwelve96To32Lanes(in, out);
+        for (unsigned int l = 0; l < K12_LANES; l++)
+        {
+            unsigned long long expected[4];
+            KangarooTwelve(input[l], 96, expected, 32);
+            for (int w = 0; w < 4; w++) EXPECT_EQ(out[w][l], expected[w]) << " it " << it << " lane " << l << " word " << w;
+        }
     }
 }
 

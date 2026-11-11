@@ -896,6 +896,79 @@ static inline void KangarooTwelve(const void* input, unsigned int inputByteLen, 
     KangarooTwelve((const unsigned char*)input, inputByteLen, (unsigned char*)output, outputByteLen);
 }
 
+// KangarooTwelve of K12_LANES independent 96-byte inputs at once (4 lanes with AVX2), first
+// 32 output bytes of each. Word-major layout: in[w][lane] is the w-th 64-bit word of that lane's input, out likewise.
+// Same result per lane as KangarooTwelve(input, 96, output, 32): one Keccak-p[1600,12] on input || 00 || 07 .. 80.
+#define K12_LANES 4
+typedef __m256i K12LaneV;
+#define K12L_XOR(a, b) _mm256_xor_si256(a, b)
+#define K12L_XOR3(a, b, c) _mm256_xor_si256(a, _mm256_xor_si256(b, c))
+#define K12L_CHI(a, b, c) _mm256_xor_si256(a, _mm256_andnot_si256(b, c)) // a ^ (~b & c)
+#define K12L_ROL(a, n) _mm256_or_si256(_mm256_slli_epi64(a, n), _mm256_srli_epi64(a, 64 - (n)))
+#define K12L_SET1(x) _mm256_set1_epi64x((long long)(x))
+#define K12L_LOAD(p) _mm256_loadu_si256((const __m256i*)(p))
+#define K12L_STORE(p, v) _mm256_storeu_si256((__m256i*)(p), v)
+
+static void KangarooTwelve96To32Lanes(const unsigned long long in[12][K12_LANES], unsigned long long out[4][K12_LANES])
+{
+    static const unsigned long long roundConstants[12] = {
+        KeccakF1600RoundConstant0, KeccakF1600RoundConstant1, KeccakF1600RoundConstant2, KeccakF1600RoundConstant3,
+        KeccakF1600RoundConstant4, KeccakF1600RoundConstant5, KeccakF1600RoundConstant6, KeccakF1600RoundConstant7,
+        KeccakF1600RoundConstant8, KeccakF1600RoundConstant9, KeccakF1600RoundConstant10, 0x8000000080008008ULL };
+    K12LaneV A[25], B[25], C[5], D[5];
+    for (int i = 0; i < 12; i++) A[i] = K12L_LOAD(in[i]);
+    for (int i = 12; i < 25; i++) A[i] = K12L_SET1(0);
+    A[12] = K12L_SET1(0x0700ULL);                 // byte 96: empty customization length, byte 97: suffix 07
+    A[20] = K12L_SET1(0x8000000000000000ULL);     // last byte of the rate: 80
+    for (int round = 0; round < 12; round++)
+    {
+        for (int x = 0; x < 5; x++) C[x] = K12L_XOR3(K12L_XOR3(A[x], A[x + 5], A[x + 10]), A[x + 15], A[x + 20]);
+        D[0] = K12L_XOR(C[4], K12L_ROL(C[1], 1));
+        D[1] = K12L_XOR(C[0], K12L_ROL(C[2], 1));
+        D[2] = K12L_XOR(C[1], K12L_ROL(C[3], 1));
+        D[3] = K12L_XOR(C[2], K12L_ROL(C[4], 1));
+        D[4] = K12L_XOR(C[3], K12L_ROL(C[0], 1));
+        for (int i = 0; i < 25; i += 5)
+        {
+            A[i] = K12L_XOR(A[i], D[0]); A[i + 1] = K12L_XOR(A[i + 1], D[1]); A[i + 2] = K12L_XOR(A[i + 2], D[2]);
+            A[i + 3] = K12L_XOR(A[i + 3], D[3]); A[i + 4] = K12L_XOR(A[i + 4], D[4]);
+        }
+        B[0] = A[0];
+        B[10] = K12L_ROL(A[1], 1);
+        B[20] = K12L_ROL(A[2], 62);
+        B[5] = K12L_ROL(A[3], 28);
+        B[15] = K12L_ROL(A[4], 27);
+        B[16] = K12L_ROL(A[5], 36);
+        B[1] = K12L_ROL(A[6], 44);
+        B[11] = K12L_ROL(A[7], 6);
+        B[21] = K12L_ROL(A[8], 55);
+        B[6] = K12L_ROL(A[9], 20);
+        B[7] = K12L_ROL(A[10], 3);
+        B[17] = K12L_ROL(A[11], 10);
+        B[2] = K12L_ROL(A[12], 43);
+        B[12] = K12L_ROL(A[13], 25);
+        B[22] = K12L_ROL(A[14], 39);
+        B[23] = K12L_ROL(A[15], 41);
+        B[8] = K12L_ROL(A[16], 45);
+        B[18] = K12L_ROL(A[17], 15);
+        B[3] = K12L_ROL(A[18], 21);
+        B[13] = K12L_ROL(A[19], 8);
+        B[14] = K12L_ROL(A[20], 18);
+        B[24] = K12L_ROL(A[21], 2);
+        B[9] = K12L_ROL(A[22], 61);
+        B[19] = K12L_ROL(A[23], 56);
+        B[4] = K12L_ROL(A[24], 14);
+        for (int i = 0; i < 25; i += 5)
+        {
+            A[i] = K12L_CHI(B[i], B[i + 1], B[i + 2]); A[i + 1] = K12L_CHI(B[i + 1], B[i + 2], B[i + 3]);
+            A[i + 2] = K12L_CHI(B[i + 2], B[i + 3], B[i + 4]); A[i + 3] = K12L_CHI(B[i + 3], B[i + 4], B[i]);
+            A[i + 4] = K12L_CHI(B[i + 4], B[i], B[i + 1]);
+        }
+        A[0] = K12L_XOR(A[0], K12L_SET1(roundConstants[round]));
+    }
+    for (int i = 0; i < 4; i++) K12L_STORE(out[i], A[i]);
+}
+
 // Chaining value of one full K12 leaf (K12_chunkSize bytes, tree mode). Leaves are independent of each
 // other, so they can be hashed in any order and on any core; KangarooTwelveStream::absorbChainingValue()
 // feeds the results into the final node in place of the leaf bytes.
