@@ -1928,6 +1928,16 @@ static inline void subtract_mod_order(const unsigned long long* a, const unsigne
     }
 }
 
+// a = a + 1 mod order, for a in [0, order-1]
+static inline void increment_mod_order(unsigned long long* a)
+{
+    if (!++a[0] && !++a[1] && !++a[2]) ++a[3];
+    if (a[0] == CURVE_ORDER_0 && a[1] == CURVE_ORDER_1 && a[2] == CURVE_ORDER_2 && a[3] == CURVE_ORDER_3)
+    {
+        a[0] = a[1] = a[2] = a[3] = 0;
+    }
+}
+
 // Vote signing PoW search over consecutive nonces. Calculating ecc_mul_fixed for each try is expensive, so the
 // candidates are C + j*G, j in [-H, H], around an affine center C, with j*G from a table built once by
 // initIncrementalSignG() at boot. Twisted Edwards a = -1: y(C +- P) = (yC*yP +- xC*xP) / (1 -+ D) with
@@ -2014,21 +2024,20 @@ static void incrSignBatchY(point_t C, f2elm_t* y)
     }
 }
 
-// s = nonce - h*k mod order with h = K12(rpm), rpm = encode(R) || publicKey || messageDigest: the value
+// s = nonce - h*k mod order for h = the first 32 bytes of K12(encode(R) || publicKey || messageDigest): the value
 // signWithRandomK_finishHalf writes to signature[32..64]. kR = k * 2^256 mod order (k in Montgomery form), so one
 // Montgomery multiplication gives h*k mod order. nonce in [0, order-1].
-static void incrSignS(const unsigned long long* kR, const unsigned long long* nonce, const unsigned char* rpm, unsigned long long* s)
+static inline void incrSignS(const unsigned long long* kR, const unsigned long long* nonce, const unsigned long long* h, unsigned long long* s)
 {
-    unsigned char h[64];
-    KangarooTwelve(rpm, 32 + 64, h, 64);
     unsigned long long hk[4];
-    Montgomery_multiply_mod_order((unsigned long long*)h, kR, hk);
+    Montgomery_multiply_mod_order(h, kR, hk);
     subtract_mod_order(nonce, hk, s);
 }
 
 // Signs with the first nonce of base, base+1, ... (base from signRandomNonceBase) or its negation whose signature
 // meets target. R and -R share y and differ in the sign bit of encode(), so each y gives two candidates
 // (nonce r for R, order - r for -R) without computing x; which sign bit belongs to r is only checked on a hit.
+// The candidates of a batch are hashed K12_LANES at a time.
 // done is checked once per batch; on a done-bail the signature is not valid.
 static void signWithRandomK_incremental(const unsigned char* subseed, const unsigned char* publicKey, const unsigned char* messageDigest, unsigned char* signature, unsigned int target, volatile int* done = nullptr)
 {
@@ -2047,22 +2056,37 @@ static void signWithRandomK_incremental(const unsigned char* subseed, const unsi
     if ((center[0] += INCR_SIGN_H) < INCR_SIGN_H && !++center[1] && !++center[2]) ++center[3];
     point_t C; ecc_mul_fixed(center, C);
 
-    unsigned char rpm[32 + 64];
-    *((m256i*)(rpm + 32)) = *((m256i*)publicKey);
-    *((m256i*)(rpm + 64)) = *((m256i*)messageDigest);
+    // K12 input words per lane: 0..3 = encode(R), 4..7 = publicKey, 8..11 = messageDigest
+    unsigned long long in[12][K12_LANES], h[4][K12_LANES];
+    for (unsigned int w = 0; w < 4; w++)
+    {
+        for (unsigned int l = 0; l < K12_LANES; l++)
+        {
+            in[4 + w][l] = ((const unsigned long long*)publicKey)[w];
+            in[8 + w][l] = ((const unsigned long long*)messageDigest)[w];
+        }
+    }
     while (!done || !*done)
     {
         f2elm_t y[INCR_SIGN_BATCH];
         incrSignBatchY(C, y);
-        for (unsigned int i = 0; i < INCR_SIGN_BATCH; i++)
+        // candidate q: y[q >> 1] with sign bit q & 1; the last group repeats the last candidate in its unused lanes
+        for (unsigned int q = 0, i = 0; q < 2 * INCR_SIGN_BATCH; q += K12_LANES)
         {
-            subtract_mod_order(zero, nonce[0], nonce[1]);
-            *((m256i*)rpm) = *((m256i*)y[i]);
-            for (unsigned char sign = 0; sign < 2; sign++)
+            for (unsigned int l = 0; l < K12_LANES; l++)
             {
-                rpm[31] = (unsigned char)((rpm[31] & 0x7F) | (sign << 7));
+                const unsigned int c = (q + l < 2 * INCR_SIGN_BATCH) ? q + l : 2 * INCR_SIGN_BATCH - 1;
+                in[0][l] = y[c >> 1][0][0]; in[1][l] = y[c >> 1][0][1]; in[2][l] = y[c >> 1][1][0];
+                in[3][l] = y[c >> 1][1][1] | ((unsigned long long)(c & 1) << 63);
+            }
+            KangarooTwelve96To32Lanes(in, h);
+            for (unsigned int l = 0; l < K12_LANES && q + l < 2 * INCR_SIGN_BATCH; l++)
+            {
+                for (; i < ((q + l) >> 1); i++) increment_mod_order(nonce[0]); // nonce[0] = r of candidate y[i]
+                subtract_mod_order(zero, nonce[0], nonce[1]);
+                const unsigned long long hl[4] = { h[0][l], h[1][l], h[2][l], h[3][l] };
                 unsigned long long hk[4];
-                incrSignS(kR, zero, rpm, hk);                                // hk = -h*k
+                incrSignS(kR, zero, hl, hk);                                 // hk = -h*k
                 for (unsigned int neg = 0; neg < 2; neg++)
                 {
                     unsigned long long s[4];
@@ -2070,19 +2094,16 @@ static void signWithRandomK_incremental(const unsigned char* subseed, const unsi
                     if (_byteswap_ulong((unsigned int)s[0]) > target) continue;
                     unsigned long long r[8] = { nonce[neg][0], nonce[neg][1], nonce[neg][2], nonce[neg][3], 0, 0, 0, 0 };
                     point_t Rhit; ecc_mul_fixed(r, Rhit);
-                    unsigned char encoded[32]; encode(Rhit, encoded);
-                    if (!(*((m256i*)encoded) == *((m256i*)rpm))) continue;   // sign bit belongs to the other nonce
-                    *((m256i*)signature) = *((m256i*)encoded);
+                    unsigned long long encoded[4]; encode(Rhit, (unsigned char*)encoded);
+                    if (encoded[0] != in[0][l] || encoded[1] != in[1][l] || encoded[2] != in[2][l] || encoded[3] != in[3][l]) continue; // sign bit belongs to the other nonce
+                    copyMem(signature, encoded, 32);
                     signWithRandomK_finishHalf(kConst, publicKey, messageDigest, r, signature);
                     if (tickVoteSignatureScore(signature) <= target) return;
                 }
             }
-            if (!++nonce[0][0] && !++nonce[0][1] && !++nonce[0][2]) ++nonce[0][3];
-            if (nonce[0][0] == CURVE_ORDER_0 && nonce[0][1] == CURVE_ORDER_1 && nonce[0][2] == CURVE_ORDER_2 && nonce[0][3] == CURVE_ORDER_3)
-            {
-                nonce[0][0] = nonce[0][1] = nonce[0][2] = nonce[0][3] = 0;
-            }
         }
+        // next batch starts at the nonce after the last candidate
+        increment_mod_order(nonce[0]);
     }
 }
 
