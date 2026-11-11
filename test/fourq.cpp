@@ -735,6 +735,20 @@ TEST(TestFourQ, SignTickVoteIncrementalPassesVerify)
         EXPECT_LE(_byteswap_ulong(((unsigned int*)s2)[0]), TARGET_TICK_VOTE_SIGNATURE);
     }
 }
+// First R = (base + i)*G meeting target, the point the incremental vote signer publishes.
+static void firstTargetR(const unsigned long long* base, unsigned int target, unsigned char* R)
+{
+    point_t A; ecc_mul_fixed((unsigned long long*)base, A);
+    point_extproj_t P; point_setup(A, P);
+    for (;;)
+    {
+        point_extproj_t cpy; copyMem(cpy, P, sizeof(cpy));
+        eccnorm(cpy, A); encode(A, R);
+        if (_byteswap_ulong(((unsigned int*)R)[0]) <= target) return;
+        eccadd(gIncrSignG, P);
+    }
+}
+
 // With broken RDRAND (constant or failing) the vote nonce must still depend on the secret key; otherwise
 // the nonce base is computable from public data and one published vote reveals the private key.
 TEST(TestFourQ, SignTickVoteNonceSecretWithBrokenRdrand)
@@ -760,6 +774,20 @@ TEST(TestFourQ, SignTickVoteNonceSecretWithBrokenRdrand)
         EXPECT_TRUE(verify(pubB, msg, sigB)) << "mode " << mode;
         // Same R for different keys means the nonce does not depend on the key.
         EXPECT_NE(memcmp(sigA, sigB, 32), 0) << "mode " << mode;
+
+        // The nonce base is K12(K12(subseed)[32..64] || RDRAND || msg); the public part alone must not reach R.
+        unsigned char k[64], in[96], R[32];
+        unsigned long long base[8];
+        KangarooTwelve(subseedA, 32, k, 64);
+        copyMem(in, k + 32, 32);
+        for (int j = 0; j < 4; j++) ((unsigned long long*)(in + 32))[j] = mode ? 0x0123456789ABCDEFULL : 0;
+        copyMem(in + 64, msg, 32);
+        KangarooTwelve(in, 96, (unsigned char*)base, 64);
+        firstTargetR(base, TARGET_TICK_VOTE_SIGNATURE, R);
+        EXPECT_EQ(memcmp(R, sigA, 32), 0) << "mode " << mode;
+        KangarooTwelve(in + 32, 64, (unsigned char*)base, 64);
+        firstTargetR(base, TARGET_TICK_VOTE_SIGNATURE, R);
+        EXPECT_NE(memcmp(R, sigA, 32), 0) << "mode " << mode;
 
         signWithRandomK(subseedA, pubA, msg, sigA2);
         EXPECT_TRUE(verify(pubA, msg, sigA2)) << "mode " << mode;
