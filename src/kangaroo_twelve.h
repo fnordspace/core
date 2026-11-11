@@ -896,9 +896,20 @@ static inline void KangarooTwelve(const void* input, unsigned int inputByteLen, 
     KangarooTwelve((const unsigned char*)input, inputByteLen, (unsigned char*)output, outputByteLen);
 }
 
-// KangarooTwelve of K12_LANES independent 96-byte inputs at once (4 lanes with AVX2), first
+// KangarooTwelve of K12_LANES independent 96-byte inputs at once (8 lanes with AVX-512, else 4 with AVX2), first
 // 32 output bytes of each. Word-major layout: in[w][lane] is the w-th 64-bit word of that lane's input, out likewise.
 // Same result per lane as KangarooTwelve(input, 96, output, 32): one Keccak-p[1600,12] on input || 00 || 07 .. 80.
+#if defined(__AVX512F__)
+#define K12_LANES 8
+typedef __m512i K12LaneV;
+#define K12L_XOR(a, b) _mm512_xor_si512(a, b)
+#define K12L_XOR3(a, b, c) _mm512_ternarylogic_epi64(a, b, c, 0x96)
+#define K12L_CHI(a, b, c) _mm512_ternarylogic_epi64(a, b, c, 0xD2) // a ^ (~b & c)
+#define K12L_ROL(a, n) _mm512_rol_epi64(a, n)
+#define K12L_SET1(x) _mm512_set1_epi64((long long)(x))
+#define K12L_LOAD(p) _mm512_loadu_si512((const void*)(p))
+#define K12L_STORE(p, v) _mm512_storeu_si512((void*)(p), v)
+#else
 #define K12_LANES 4
 typedef __m256i K12LaneV;
 #define K12L_XOR(a, b) _mm256_xor_si256(a, b)
@@ -908,6 +919,7 @@ typedef __m256i K12LaneV;
 #define K12L_SET1(x) _mm256_set1_epi64x((long long)(x))
 #define K12L_LOAD(p) _mm256_loadu_si256((const __m256i*)(p))
 #define K12L_STORE(p, v) _mm256_storeu_si256((__m256i*)(p), v)
+#endif
 
 static void KangarooTwelve96To32Lanes(const unsigned long long in[12][K12_LANES], unsigned long long out[4][K12_LANES])
 {
