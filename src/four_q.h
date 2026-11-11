@@ -1928,41 +1928,87 @@ static inline void subtract_mod_order(const unsigned long long* a, const unsigne
     }
 }
 
-// Incremental vote signing PoW. Calculating ecc_mul_fixed for each try is expensive. Searching r sequentially
-// (random r0, then r0+1, r0+2, ...) makes each step a significantly cheaper point addition R_{i+1}=R_i+G (eccadd).
-// gIncrSignG is G in eccadd-precomp form, built once by initIncrementalSignG() at boot.
-static point_extproj_precomp_t gIncrSignG;
+// Vote signing PoW search over consecutive nonces. Calculating ecc_mul_fixed for each try is expensive, so the
+// candidates are C + j*G, j in [-H, H], around an affine center C, with j*G from a table built once by
+// initIncrementalSignG() at boot. Twisted Edwards a = -1: y(C +- P) = (yC*yP +- xC*xP) / (1 -+ D) with
+// D = d*xC*yC*xP*yP, and n/den = n*conj(den) / |den|^2 with one Fp inversion per batch (Montgomery trick).
+// C + P and C - P share all products. x of the candidates is not needed (see signWithRandomK_incremental).
+static constexpr unsigned int INCR_SIGN_H = 128;
+static constexpr unsigned int INCR_SIGN_BATCH = 2 * INCR_SIGN_H + 1;
+struct IncrSignTabEntry { f2elm_t y, x, e, u, v; felm_t ne; };   // of P = j*G: e = d*x*y, u = y*conj(e), v = x*conj(e), ne = |e|^2
+static IncrSignTabEntry gIncrSignTab[INCR_SIGN_H];               // gIncrSignTab[j-1] <-> j*G
+static point_t gIncrSignStep;                                    // INCR_SIGN_BATCH*G, moves the center by one batch
+static f2elm_t gIncrSignStepE;
 
 static void initIncrementalSignG()
 {
-    unsigned long long one[8] = { 1,0,0,0,0,0,0,0 };
-    point_t Gaff; ecc_mul_fixed(one, Gaff);
-    point_extproj_t Gext; point_setup(Gaff, Gext);
-    R1_to_R2(Gext, gIncrSignG);
+    for (unsigned int i = 1; i <= INCR_SIGN_H + 1; i++)
+    {
+        unsigned long long k[8] = { i == INCR_SIGN_H + 1 ? INCR_SIGN_BATCH : i, 0, 0, 0, 0, 0, 0, 0 };
+        point_t P; ecc_mul_fixed(k, P);
+        f2elm_t e, ce; fp2mul1271(P->x, P->y, e); fp2mul1271(e, (felm_t*)&PARAMETER_d, e);
+        if (i == INCR_SIGN_H + 1) { copyMem(gIncrSignStep, P, sizeof(point_t)); copyMem(gIncrSignStepE, e, sizeof(e)); break; }
+        IncrSignTabEntry& t = gIncrSignTab[i - 1];
+        copyMem(ce, e, sizeof(e)); fpneg1271(ce[1]);
+        copyMem(t.y, P->y, sizeof(f2elm_t)); copyMem(t.x, P->x, sizeof(f2elm_t)); copyMem(t.e, e, sizeof(e));
+        fp2mul1271(P->y, ce, t.u); fp2mul1271(P->x, ce, t.v);
+        felm_t a, b; fpsqr1271(e[0], a); fpsqr1271(e[1], b); fpadd1271(a, b, t.ne);
+    }
 }
 
-static constexpr unsigned int INCR_SIGN_BATCH = 64;
-
-// y[i] = affine y of R + i*G, fully reduced as eccnorm gives it: y = Y/Z = Y*conj(Z) / (z0^2 + z1^2) (i^2 = -1).
-// One Fp inversion per batch (Montgomery trick over the norms). R is advanced by INCR_SIGN_BATCH*G.
-static void incrSignBatchY(point_extproj_t R, f2elm_t* y)
+// y[H + j] = affine y of C + j*G (j = -H..H), fully reduced as eccnorm gives it. C is replaced by C + INCR_SIGN_BATCH*G.
+static void incrSignBatchY(point_t C, f2elm_t* y)
 {
-    felm_t norm[INCR_SIGN_BATCH], prefix[INCR_SIGN_BATCH], t, inv;
-    for (unsigned int i = 0; i < INCR_SIGN_BATCH; i++)
+    static constexpr unsigned int K = 2 * INCR_SIGN_H + 2;                        // 2H candidates + x and y of the next center
+    felm_t norm[K], prefix[K], one = { 1, 0 }, t, inv, nc;
+    f2elm_t c, cc, U, V;
+    fp2mul1271(C->x, C->y, c); copyMem(cc, c, sizeof(c)); fpneg1271(cc[1]);
+    fp2mul1271(C->y, cc, U); fp2mul1271(C->x, cc, V);
+    fpsqr1271(c[0], nc); fpsqr1271(c[1], t); fpadd1271(nc, t, nc);
+
+    copyMem(y[INCR_SIGN_H], C->y, sizeof(f2elm_t)); mod1271(y[INCR_SIGN_H][0]); mod1271(y[INCR_SIGN_H][1]);
+
+    for (unsigned int i = 0; i < INCR_SIGN_H; i++)
     {
-        fpmul1271(R->y[0], R->z[0], y[i][0]); fpmul1271(R->y[1], R->z[1], t); fpadd1271(y[i][0], t, y[i][0]);
-        fpmul1271(R->y[1], R->z[0], y[i][1]); fpmul1271(R->y[0], R->z[1], t); fpsub1271(y[i][1], t, y[i][1]);
-        fpsqr1271(R->z[0], norm[i]); fpsqr1271(R->z[1], t); fpadd1271(norm[i], t, norm[i]);
-        if (i) fpmul1271(prefix[i - 1], norm[i], prefix[i]); else copyMem(prefix[0], norm[0], sizeof(felm_t));
-        eccadd(gIncrSignG, R);
+        IncrSignTabEntry& e = gIncrSignTab[i];
+        f2elm_t A, B, P, Q;
+        felm_t D0, ND;
+        fp2mul1271(C->y, e.y, A); fp2mul1271(C->x, e.x, B); fp2mul1271(U, e.u, P); fp2mul1271(V, e.v, Q);
+        fpmul1271(c[0], e.e[0], D0); fpmul1271(c[1], e.e[1], t); fpsub1271(D0, t, D0);    // Re(D)
+        fpmul1271(nc, e.ne, ND);                                                  // |D|^2
+        fpadd1271(ND, one, ND); fpadd1271(D0, D0, D0);
+        fpsub1271(ND, D0, norm[2 * i]); fpadd1271(ND, D0, norm[2 * i + 1]);       // |1 -+ D|^2
+        fp2sub1271(A, Q, A); fp2sub1271(B, P, B);
+        fp2add1271(A, B, y[INCR_SIGN_H + (i + 1)]);                               // numerator of y(C + P): A+B-P-Q
+        fp2sub1271(A, B, y[INCR_SIGN_H - (i + 1)]);                               // numerator of y(C - P): A-B+P-Q
     }
-    fpexp1251(prefix[INCR_SIGN_BATCH - 1], t);                              // inv = prefix^(p-2), as in eccnorm
-    fpsqr1271(t, t); fpsqr1271(t, t); fpmul1271(prefix[INCR_SIGN_BATCH - 1], t, inv);
-    for (unsigned int i = INCR_SIGN_BATCH - 1; ; i--)                       // invariant: inv = 1/prefix[i]
+    // C' = C + S: x' = nx / (1 + Ds), y' = ny / (1 - Ds); their norms ride along in the same inversion
+    f2elm_t Ds, dx, dy, nx, ny, t2;
+    fp2mul1271(c, gIncrSignStepE, Ds);
+    copyMem(dx, Ds, sizeof(Ds)); fpadd1271(dx[0], one, dx[0]);
+    copyMem(dy, Ds, sizeof(Ds)); fp2neg1271(dy); fpadd1271(dy[0], one, dy[0]);
+    fpsqr1271(dx[0], norm[K - 2]); fpsqr1271(dx[1], t); fpadd1271(norm[K - 2], t, norm[K - 2]);
+    fpsqr1271(dy[0], norm[K - 1]); fpsqr1271(dy[1], t); fpadd1271(norm[K - 1], t, norm[K - 1]);
+    fp2mul1271(C->x, gIncrSignStep->y, nx); fp2mul1271(C->y, gIncrSignStep->x, t2); fp2add1271(nx, t2, nx);
+    fp2mul1271(C->y, gIncrSignStep->y, ny); fp2mul1271(C->x, gIncrSignStep->x, t2); fp2add1271(ny, t2, ny);
+    fpneg1271(dx[1]); fpneg1271(dy[1]);
+    fp2mul1271(nx, dx, nx); fp2mul1271(ny, dy, ny);
+
+    copyMem(prefix[0], norm[0], sizeof(felm_t));
+    for (unsigned int i = 1; i < K; i++) fpmul1271(prefix[i - 1], norm[i], prefix[i]);
+    fpexp1251(prefix[K - 1], t);                                                  // inv = prefix^(p-2), as in eccnorm
+    fpsqr1271(t, t); fpsqr1271(t, t); fpmul1271(prefix[K - 1], t, inv);
+    for (unsigned int i = K - 1; ; i--)                                           // invariant: inv = 1/prefix[i]
     {
-        if (i) fpmul1271(inv, prefix[i - 1], t); else copyMem(t, inv, sizeof(felm_t)); // t = 1/norm[i]
-        fpmul1271(y[i][0], t, y[i][0]); mod1271(y[i][0]);
-        fpmul1271(y[i][1], t, y[i][1]); mod1271(y[i][1]);
+        if (i) fpmul1271(inv, prefix[i - 1], t); else copyMem(t, inv, sizeof(felm_t));  // t = 1/norm[i]
+        if (i == K - 1) { fpmul1271(ny[0], t, C->y[0]); fpmul1271(ny[1], t, C->y[1]); }
+        else if (i == K - 2) { fpmul1271(nx[0], t, C->x[0]); fpmul1271(nx[1], t, C->x[1]); }
+        else
+        {
+            felm_t* yi = y[(i & 1) ? INCR_SIGN_H - ((i >> 1) + 1) : INCR_SIGN_H + ((i >> 1) + 1)];
+            fpmul1271(yi[0], t, yi[0]); mod1271(yi[0]);
+            fpmul1271(yi[1], t, yi[1]); mod1271(yi[1]);
+        }
         if (!i) break;
         fpmul1271(inv, norm[i], inv);
     }
@@ -1990,14 +2036,16 @@ static void signWithRandomK_incremental(const unsigned char* subseed, const unsi
     KangarooTwelve((unsigned char*)subseed, 32, kConst, 64);
     unsigned long long base[8];
     signRandomNonceBase(kConst, messageDigest, base);
-    point_t R0aff; ecc_mul_fixed(base, R0aff);                               // R0 = base * G (one full mul)
-    point_extproj_t Rext; point_setup(R0aff, Rext);
 
     static const unsigned long long zero[4] = { 0, 0, 0, 0 };
     unsigned long long kR[4], nonce[2][4];                                   // nonce[0] = r, nonce[1] = order - r
     Montgomery_multiply_mod_order((unsigned long long*)kConst, Montgomery_Rprime, kR);
     Montgomery_multiply_mod_order(base, Montgomery_Rprime, nonce[0]);        // r = base mod order, as in ecc_mul_fixed
     Montgomery_multiply_mod_order(nonce[0], ONE, nonce[0]);
+    // center of the first batch = (r + H)*G, so the batch covers the nonces r .. r + 2H
+    unsigned long long center[8] = { nonce[0][0], nonce[0][1], nonce[0][2], nonce[0][3], 0, 0, 0, 0 };
+    if ((center[0] += INCR_SIGN_H) < INCR_SIGN_H && !++center[1] && !++center[2]) ++center[3];
+    point_t C; ecc_mul_fixed(center, C);
 
     unsigned char rpm[32 + 64];
     *((m256i*)(rpm + 32)) = *((m256i*)publicKey);
@@ -2005,7 +2053,7 @@ static void signWithRandomK_incremental(const unsigned char* subseed, const unsi
     while (!done || !*done)
     {
         f2elm_t y[INCR_SIGN_BATCH];
-        incrSignBatchY(Rext, y);
+        incrSignBatchY(C, y);
         for (unsigned int i = 0; i < INCR_SIGN_BATCH; i++)
         {
             subtract_mod_order(zero, nonce[0], nonce[1]);
