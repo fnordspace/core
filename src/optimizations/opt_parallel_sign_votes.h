@@ -2,7 +2,7 @@
 
 // Parallel signTickVote with STRAGGLER RACING:
 //
-// signTickVote is a mandatory proof-of-work retry loop: signWithRandomK + verify until the
+// signTickVote is a mandatory proof-of-work loop: it searches nonces until the
 // signature score <= getTargetTickVoteSignature(tick).
 //
 // This optimization splits the sign tasks one-per-index across the request-processor pool. 
@@ -49,9 +49,9 @@ struct ParallelSignVoteTasks
         volatile int done;      // 0 = in progress, 1 = a valid signature has been committed
     };
 
-    // Racing sign function: attempt random-K signatures until one is valid (writes it to outSig
+    // Racing sign function: search nonces until a signature meets the target (writes it to outSig
     // and returns true) OR `done` is observed set by another core (returns false, bail). Defined
-    // in qubic.cpp where verifyTickVoteSignature / signWithRandomK are in scope.
+    // in qubic.cpp (signTickVoteRacing).
     typedef bool (*SignFunc)(const unsigned char* subseed,
                              const unsigned char* publicKey,
                              const unsigned char* messageDigest,
