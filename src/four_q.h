@@ -1969,14 +1969,14 @@ static void incrSignBatchY(point_extproj_t R, f2elm_t* y)
 }
 
 // s = nonce - h*k mod order with h = K12(rpm), rpm = encode(R) || publicKey || messageDigest: the value
-// signWithRandomK_finishHalf writes to signature[32..64]. kR2 = k * 2^512 mod order, nonce in [0, order-1].
-static void incrSignS(const unsigned long long* kR2, const unsigned long long* nonce, const unsigned char* rpm, unsigned long long* s)
+// signWithRandomK_finishHalf writes to signature[32..64]. kR = k * 2^256 mod order (k in Montgomery form), so one
+// Montgomery multiplication gives h*k mod order. nonce in [0, order-1].
+static void incrSignS(const unsigned long long* kR, const unsigned long long* nonce, const unsigned char* rpm, unsigned long long* s)
 {
     unsigned char h[64];
     KangarooTwelve(rpm, 32 + 64, h, 64);
     unsigned long long hk[4];
-    Montgomery_multiply_mod_order((unsigned long long*)h, kR2, hk);
-    Montgomery_multiply_mod_order(hk, ONE, hk);
+    Montgomery_multiply_mod_order((unsigned long long*)h, kR, hk);
     subtract_mod_order(nonce, hk, s);
 }
 
@@ -1994,9 +1994,8 @@ static void signWithRandomK_incremental(const unsigned char* subseed, const unsi
     point_extproj_t Rext; point_setup(R0aff, Rext);
 
     static const unsigned long long zero[4] = { 0, 0, 0, 0 };
-    unsigned long long kR2[4], nonce[2][4];                                  // nonce[0] = r, nonce[1] = order - r
-    Montgomery_multiply_mod_order((unsigned long long*)kConst, Montgomery_Rprime, kR2);
-    Montgomery_multiply_mod_order(kR2, Montgomery_Rprime, kR2);
+    unsigned long long kR[4], nonce[2][4];                                   // nonce[0] = r, nonce[1] = order - r
+    Montgomery_multiply_mod_order((unsigned long long*)kConst, Montgomery_Rprime, kR);
     Montgomery_multiply_mod_order(base, Montgomery_Rprime, nonce[0]);        // r = base mod order, as in ecc_mul_fixed
     Montgomery_multiply_mod_order(nonce[0], ONE, nonce[0]);
 
@@ -2015,7 +2014,7 @@ static void signWithRandomK_incremental(const unsigned char* subseed, const unsi
             {
                 rpm[31] = (unsigned char)((rpm[31] & 0x7F) | (sign << 7));
                 unsigned long long hk[4];
-                incrSignS(kR2, zero, rpm, hk);                               // hk = -h*k
+                incrSignS(kR, zero, rpm, hk);                                // hk = -h*k
                 for (unsigned int neg = 0; neg < 2; neg++)
                 {
                     unsigned long long s[4];

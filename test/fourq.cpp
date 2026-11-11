@@ -836,9 +836,8 @@ TEST(TestFourQ, SignTickVoteFastSMatchesFinishHalf)
     getPrivateKey(subseed, privateKey);
     getPublicKey(privateKey, publicKey);
     KangarooTwelve(subseed, 32, kConst, 64);
-    unsigned long long kR2[4];
-    Montgomery_multiply_mod_order((unsigned long long*)kConst, Montgomery_Rprime, kR2);
-    Montgomery_multiply_mod_order(kR2, Montgomery_Rprime, kR2);
+    unsigned long long kR[4];
+    Montgomery_multiply_mod_order((unsigned long long*)kConst, Montgomery_Rprime, kR);
     const unsigned long long zero[4] = { 0, 0, 0, 0 };
 
     for (int it = 0; it < 50; it++)
@@ -859,7 +858,7 @@ TEST(TestFourQ, SignTickVoteFastSMatchesFinishHalf)
             point_t R; ecc_mul_fixed(r, R); encode(R, encoded[neg]);
             copyMem(rpm, encoded[neg], 32);
             unsigned long long s[4];
-            incrSignS(kR2, nonce[neg], rpm, s);
+            incrSignS(kR, nonce[neg], rpm, s);
             unsigned char signature[64];
             copyMem(signature, encoded[neg], 32);
             signWithRandomK_finishHalf(kConst, publicKey, rpm + 64, r, signature);
