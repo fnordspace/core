@@ -1887,10 +1887,9 @@ static void signWithRandomK(const unsigned char* subseed, const unsigned char* p
     }
 }
 
-// Completes the second half of the signature[32..64]. Since the vote signing PoW only checks the first half
-// of the signature[0..32], the second half only needs to be computed once using the r that passed the PoW check. 
-// kConst is K12(subseed) (first 32 bytes used); r is the winning rOut (consumed, modified in place exactly as signWithRandomK does);
-// signature[0..32] = the winning encode(R); messageDigest is the same digest passed to signWithRandomK_incremental.
+// Completes the second half of the signature[32..64] for the nonce r and signature[0..32] = encode(r*G).
+// kConst is K12(subseed) (first 32 bytes used); r is consumed (modified in place exactly as signWithRandomK does);
+// messageDigest is the same digest passed to signWithRandomK_incremental.
 static void signWithRandomK_finishHalf(const unsigned char* kConst, const unsigned char* publicKey, const unsigned char* messageDigest, unsigned long long* r, unsigned char* signature)
 {
     // h = K12(encode(R) || publicKey || messageDigest) exactly as in signWithRandomK
@@ -1913,9 +1912,24 @@ static void signWithRandomK_finishHalf(const unsigned char* kConst, const unsign
     }
 }
 
-// Incremental vote signing PoW. The PoW score is fully determined by encode(r*G) but calculating
-// the ecc_mul_fixed for each signWithRandomK try is expensive. Searching r sequentially (random r0, then r0+1, r0+2, ...)
-// makes each step a significantly cheaper point addition R_{i+1}=R_i+G (eccadd).
+// Tick vote PoW score: the low 32 bits of s (second signature half). s = r - h*k with
+// h = K12(encode(R) || publicKey || messageDigest), so the score cannot be ground before the vote digest is known.
+static inline unsigned int tickVoteSignatureScore(const unsigned char* signature)
+{
+    return _byteswap_ulong(((const unsigned int*)signature)[8]);
+}
+
+// c = a - b mod order, for a, b in [0, order-1]
+static inline void subtract_mod_order(const unsigned long long* a, const unsigned long long* b, unsigned long long* c)
+{
+    if (_subborrow_u64(_subborrow_u64(_subborrow_u64(_subborrow_u64(0, a[0], b[0], &c[0]), a[1], b[1], &c[1]), a[2], b[2], &c[2]), a[3], b[3], &c[3]))
+    {
+        _addcarry_u64(_addcarry_u64(_addcarry_u64(_addcarry_u64(0, c[0], CURVE_ORDER_0, &c[0]), c[1], CURVE_ORDER_1, &c[1]), c[2], CURVE_ORDER_2, &c[2]), c[3], CURVE_ORDER_3, &c[3]);
+    }
+}
+
+// Incremental vote signing PoW. Calculating ecc_mul_fixed for each try is expensive. Searching r sequentially
+// (random r0, then r0+1, r0+2, ...) makes each step a significantly cheaper point addition R_{i+1}=R_i+G (eccadd).
 // gIncrSignG is G in eccadd-precomp form, built once by initIncrementalSignG() at boot.
 static point_extproj_precomp_t gIncrSignG;
 
@@ -1927,32 +1941,17 @@ static void initIncrementalSignG()
     R1_to_R2(Gext, gIncrSignG);
 }
 
-// Old per-attempt search: returns the first offset i with encode(R + i*G) meeting target (or where done was seen),
-// leaving encode(R + i*G) in signature[0..32]. R is advanced to R + i*G.
-static unsigned long long incrSignSearchSerial(point_extproj_t Rext, unsigned char* signature, unsigned int target, volatile int* done)
-{
-    unsigned long long offset = 0;
-    while (!done || !*done)
-    {
-        point_extproj_t cpy; copyMem(cpy, Rext, sizeof(point_extproj_t));    // eccnorm mutates z -> work on a copy
-        point_t Raff; eccnorm(cpy, Raff); encode(Raff, signature);
-        if (_byteswap_ulong(((unsigned int*)signature)[0]) <= target) break;
-        eccadd(gIncrSignG, Rext); offset++;
-    }
-    return offset;
-}
-
 static constexpr unsigned int INCR_SIGN_BATCH = 64;
 
-// scores[i] = PoW score of R + i*G, i.e. _byteswap_ulong of the low 32 bits of encode(.), which are the low bits of
-// the affine Re(y) = Re(Y/Z) = (y0*z0 + y1*z1) / (z0^2 + z1^2) (i^2 = -1). One Fp inversion per batch
-// (Montgomery trick over the norms). R is advanced by INCR_SIGN_BATCH*G.
-static void incrSignBatchScores(point_extproj_t R, unsigned int* scores)
+// y[i] = affine y of R + i*G, fully reduced as eccnorm gives it: y = Y/Z = Y*conj(Z) / (z0^2 + z1^2) (i^2 = -1).
+// One Fp inversion per batch (Montgomery trick over the norms). R is advanced by INCR_SIGN_BATCH*G.
+static void incrSignBatchY(point_extproj_t R, f2elm_t* y)
 {
-    felm_t num[INCR_SIGN_BATCH], norm[INCR_SIGN_BATCH], prefix[INCR_SIGN_BATCH], t, inv;
+    felm_t norm[INCR_SIGN_BATCH], prefix[INCR_SIGN_BATCH], t, inv;
     for (unsigned int i = 0; i < INCR_SIGN_BATCH; i++)
     {
-        fpmul1271(R->y[0], R->z[0], num[i]); fpmul1271(R->y[1], R->z[1], t); fpadd1271(num[i], t, num[i]);
+        fpmul1271(R->y[0], R->z[0], y[i][0]); fpmul1271(R->y[1], R->z[1], t); fpadd1271(y[i][0], t, y[i][0]);
+        fpmul1271(R->y[1], R->z[0], y[i][1]); fpmul1271(R->y[0], R->z[1], t); fpsub1271(y[i][1], t, y[i][1]);
         fpsqr1271(R->z[0], norm[i]); fpsqr1271(R->z[1], t); fpadd1271(norm[i], t, norm[i]);
         if (i) fpmul1271(prefix[i - 1], norm[i], prefix[i]); else copyMem(prefix[0], norm[0], sizeof(felm_t));
         eccadd(gIncrSignG, R);
@@ -1962,39 +1961,29 @@ static void incrSignBatchScores(point_extproj_t R, unsigned int* scores)
     for (unsigned int i = INCR_SIGN_BATCH - 1; ; i--)                       // invariant: inv = 1/prefix[i]
     {
         if (i) fpmul1271(inv, prefix[i - 1], t); else copyMem(t, inv, sizeof(felm_t)); // t = 1/norm[i]
-        fpmul1271(num[i], t, t); mod1271(t);
-        scores[i] = _byteswap_ulong((unsigned int)t[0]);
+        fpmul1271(y[i][0], t, y[i][0]); mod1271(y[i][0]);
+        fpmul1271(y[i][1], t, y[i][1]); mod1271(y[i][1]);
         if (!i) break;
         fpmul1271(inv, norm[i], inv);
     }
 }
 
-// Same result as incrSignSearchSerial (offset, signature[0..32], R) when no done is seen; done is checked once per batch.
-// On a done-bail signature[0..32] is not written.
-static unsigned long long incrSignSearchBatch(point_extproj_t Rext, unsigned char* signature, unsigned int target, volatile int* done)
+// s = nonce - h*k mod order with h = K12(rpm), rpm = encode(R) || publicKey || messageDigest: the value
+// signWithRandomK_finishHalf writes to signature[32..64]. kR2 = k * 2^512 mod order, nonce in [0, order-1].
+static void incrSignS(const unsigned long long* kR2, const unsigned long long* nonce, const unsigned char* rpm, unsigned long long* s)
 {
-    unsigned long long offset = 0;
-    while (!done || !*done)
-    {
-        point_extproj_t start; copyMem(start, Rext, sizeof(point_extproj_t));
-        unsigned int scores[INCR_SIGN_BATCH];
-        incrSignBatchScores(Rext, scores);
-        for (unsigned int i = 0; i < INCR_SIGN_BATCH; i++)
-        {
-            if (scores[i] <= target)
-            {
-                for (unsigned int j = 0; j < i; j++) eccadd(gIncrSignG, start);
-                copyMem(Rext, start, sizeof(point_extproj_t));
-                point_t Raff; eccnorm(start, Raff); encode(Raff, signature);
-                return offset + i;
-            }
-        }
-        offset += INCR_SIGN_BATCH;
-    }
-    return offset;
+    unsigned char h[64];
+    KangarooTwelve(rpm, 32 + 64, h, 64);
+    unsigned long long hk[4];
+    Montgomery_multiply_mod_order((unsigned long long*)h, kR2, hk);
+    Montgomery_multiply_mod_order(hk, ONE, hk);
+    subtract_mod_order(nonce, hk, s);
 }
 
-template <bool batched = false>
+// Signs with the first nonce of base, base+1, ... (base from signRandomNonceBase) or its negation whose signature
+// meets target. R and -R share y and differ in the sign bit of encode(), so each y gives two candidates
+// (nonce r for R, order - r for -R) without computing x; which sign bit belongs to r is only checked on a hit.
+// done is checked once per batch; on a done-bail the signature is not valid.
 static void signWithRandomK_incremental(const unsigned char* subseed, const unsigned char* publicKey, const unsigned char* messageDigest, unsigned char* signature, unsigned int target, volatile int* done = nullptr)
 {
     unsigned char kConst[64];
@@ -2003,12 +1992,51 @@ static void signWithRandomK_incremental(const unsigned char* subseed, const unsi
     signRandomNonceBase(kConst, messageDigest, base);
     point_t R0aff; ecc_mul_fixed(base, R0aff);                               // R0 = base * G (one full mul)
     point_extproj_t Rext; point_setup(R0aff, Rext);
-    unsigned long long offset = batched ? incrSignSearchBatch(Rext, signature, target, done)
-                                        : incrSignSearchSerial(Rext, signature, target, done);
-    unsigned long long r[8]; copyMem(r, base, sizeof(r));                    // winning nonce r = base + offset
-    unsigned long long carry = offset;
-    for (int j = 0; j < 8 && carry; j++) { unsigned long long old = r[j]; r[j] += carry; carry = (r[j] < old) ? 1ull : 0ull; }
-    signWithRandomK_finishHalf(kConst, publicKey, messageDigest, r, signature);
+
+    static const unsigned long long zero[4] = { 0, 0, 0, 0 };
+    unsigned long long kR2[4], nonce[2][4];                                  // nonce[0] = r, nonce[1] = order - r
+    Montgomery_multiply_mod_order((unsigned long long*)kConst, Montgomery_Rprime, kR2);
+    Montgomery_multiply_mod_order(kR2, Montgomery_Rprime, kR2);
+    Montgomery_multiply_mod_order(base, Montgomery_Rprime, nonce[0]);        // r = base mod order, as in ecc_mul_fixed
+    Montgomery_multiply_mod_order(nonce[0], ONE, nonce[0]);
+
+    unsigned char rpm[32 + 64];
+    *((m256i*)(rpm + 32)) = *((m256i*)publicKey);
+    *((m256i*)(rpm + 64)) = *((m256i*)messageDigest);
+    while (!done || !*done)
+    {
+        f2elm_t y[INCR_SIGN_BATCH];
+        incrSignBatchY(Rext, y);
+        for (unsigned int i = 0; i < INCR_SIGN_BATCH; i++)
+        {
+            subtract_mod_order(zero, nonce[0], nonce[1]);
+            *((m256i*)rpm) = *((m256i*)y[i]);
+            for (unsigned char sign = 0; sign < 2; sign++)
+            {
+                rpm[31] = (unsigned char)((rpm[31] & 0x7F) | (sign << 7));
+                unsigned long long hk[4];
+                incrSignS(kR2, zero, rpm, hk);                               // hk = -h*k
+                for (unsigned int neg = 0; neg < 2; neg++)
+                {
+                    unsigned long long s[4];
+                    subtract_mod_order(hk, nonce[neg ^ 1], s);               // nonce[neg] - h*k
+                    if (_byteswap_ulong((unsigned int)s[0]) > target) continue;
+                    unsigned long long r[8] = { nonce[neg][0], nonce[neg][1], nonce[neg][2], nonce[neg][3], 0, 0, 0, 0 };
+                    point_t Rhit; ecc_mul_fixed(r, Rhit);
+                    unsigned char encoded[32]; encode(Rhit, encoded);
+                    if (!(*((m256i*)encoded) == *((m256i*)rpm))) continue;   // sign bit belongs to the other nonce
+                    *((m256i*)signature) = *((m256i*)encoded);
+                    signWithRandomK_finishHalf(kConst, publicKey, messageDigest, r, signature);
+                    if (tickVoteSignatureScore(signature) <= target) return;
+                }
+            }
+            if (!++nonce[0][0] && !++nonce[0][1] && !++nonce[0][2]) ++nonce[0][3];
+            if (nonce[0][0] == CURVE_ORDER_0 && nonce[0][1] == CURVE_ORDER_1 && nonce[0][2] == CURVE_ORDER_2 && nonce[0][3] == CURVE_ORDER_3)
+            {
+                nonce[0][0] = nonce[0][1] = nonce[0][2] = nonce[0][3] = 0;
+            }
+        }
+    }
 }
 
 static bool verify(const unsigned char* publicKey, const unsigned char* messageDigest, const unsigned char* signature)

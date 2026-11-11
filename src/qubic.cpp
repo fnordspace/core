@@ -1172,15 +1172,10 @@ static unsigned int getTargetTickVoteSignature(unsigned int tick)
     return (tick >= (unsigned int)sw) ? (unsigned int)(sw >> 32) : tickVoteSignatureTargetBeforeSwitch;
 }
 
-static bool verifyTickVoteSignature(const unsigned char* publicKey, const unsigned char* messageDigest, const unsigned char* signature, const unsigned int tick, const bool curveVerify = true)
+static bool verifyTickVoteSignature(const unsigned char* publicKey, const unsigned char* messageDigest, const unsigned char* signature, const unsigned int tick)
 {
-    unsigned int score = _byteswap_ulong(((unsigned int*)signature)[0]);
-    if (score > getTargetTickVoteSignature(tick)) return false;
-    if (curveVerify)
-    {
-        if (!verify(publicKey, messageDigest, signature)) return false;
-    }
-    return true;
+    if (tickVoteSignatureScore(signature) > getTargetTickVoteSignature(tick)) return false;
+    return verify(publicKey, messageDigest, signature);
 }
 
 static void processBroadcastTick(Peer* peer, RequestResponseHeader* header)
@@ -1203,8 +1198,7 @@ static void processBroadcastTick(Peer* peer, RequestResponseHeader* header)
         request->tick.computorIndex ^= BroadcastTick::type();
         KangarooTwelve(&request->tick, sizeof(Tick) - SIGNATURE_SIZE, digest, sizeof(digest));
         request->tick.computorIndex ^= BroadcastTick::type();
-        const bool verifyFourQCurve = true;
-        if (verifyTickVoteSignature(broadcastedComputors.computors.publicKeys[request->tick.computorIndex].m256i_u8, digest, request->tick.signature, request->tick.tick, verifyFourQCurve))
+        if (verifyTickVoteSignature(broadcastedComputors.computors.publicKeys[request->tick.computorIndex].m256i_u8, digest, request->tick.signature, request->tick.tick))
         {
             if (header->isDejavuZero())
             {
@@ -6302,12 +6296,11 @@ static void signTickVote(const unsigned char* subseed, const unsigned char* publ
 {
     PROFILE_SCOPE();
 
-    signWithRandomK_incremental<USE_BATCH_INVERSION_SIGN_VOTES>(subseed, publicKey, messageDigest, signature, target);
-    return;
+    signWithRandomK_incremental(subseed, publicKey, messageDigest, signature, target);
 }
 
 #if USE_PARALLEL_SIGN_VOTES
-// Racing variant for parallelSignVotes straggler-racing. Same mandatory PoW (signWithRandomK + verify until
+// Racing variant for parallelSignVotes straggler-racing. Same mandatory PoW as signTickVote (nonce search until
 // score <= target), but writes into the caller's scratch buffer and BAILS the moment
 // `done` is observed set — i.e. another core already produced a valid signature for this same index.
 // Returns true with a valid signature in outSig, or false if it bailed. The pool's processTask() commits
@@ -6319,7 +6312,7 @@ static bool signTickVoteRacing(const unsigned char* subseed, const unsigned char
     PROFILE_SCOPE();
 
     if (*done) return false; // skip starting if another core already won
-    signWithRandomK_incremental<USE_BATCH_INVERSION_SIGN_VOTES>(subseed, publicKey, messageDigest, outSig, target, done);
+    signWithRandomK_incremental(subseed, publicKey, messageDigest, outSig, target, done);
     return !*done; // a bail leaves outSig invalid
 }
 #endif

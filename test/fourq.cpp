@@ -728,14 +728,19 @@ TEST(TestFourQ, SignTickVoteIncrementalPassesVerify)
 
     constexpr unsigned long long TARGET_TICK_VOTE_SIGNATURE = 0x07FFFFFFU; // around 32 signing operations per ID
 
+    int rAboveTarget = 0;
     for (int it = 0; it < 100; it++)
     {
         unsigned char m2[32], s2[64];
         for (int i = 0; i < 32; i++) m2[i] = (unsigned char)(msg[i] ^ (unsigned char)(it * 7 + i));
         signWithRandomK_incremental(subseed, publicKey, m2, s2, TARGET_TICK_VOTE_SIGNATURE);
         EXPECT_TRUE(verify(publicKey, m2, s2));
-        EXPECT_LE(_byteswap_ulong(((unsigned int*)s2)[0]), TARGET_TICK_VOTE_SIGNATURE);
+        EXPECT_EQ(tickVoteSignatureScore(s2), _byteswap_ulong(((unsigned int*)s2)[8]));
+        EXPECT_LE(tickVoteSignatureScore(s2), TARGET_TICK_VOTE_SIGNATURE);
+        rAboveTarget += _byteswap_ulong(((unsigned int*)s2)[0]) > TARGET_TICK_VOTE_SIGNATURE;
     }
+    // The score is taken from s, not from encode(R): R alone meets the target only by chance (1/32 here).
+    EXPECT_GT(rAboveTarget, 80);
 }
 // With broken RDRAND (constant or failing) the vote nonce must still depend on the secret key; otherwise
 // the nonce base is computable from public data and one published vote reveals the private key.
@@ -796,15 +801,7 @@ static void incrSignPointFromBase(const unsigned long long* base, point_extproj_
     point_t a; ecc_mul_fixed(b, a); point_setup(a, R);
 }
 
-static unsigned int incrSignScore(point_extproj_t R)
-{
-    point_extproj_t c; copyMem(c, R, sizeof(c));
-    point_t a; eccnorm(c, a);
-    unsigned char e[32]; encode(a, e);
-    return _byteswap_ulong(((unsigned int*)e)[0]);
-}
-
-TEST(TestFourQ, SignTickVoteBatchScoresMatchEccnorm)
+TEST(TestFourQ, SignTickVoteBatchYMatchesEccnorm)
 {
     incrSignTestInit();
     unsigned long long base[8];
@@ -815,11 +812,13 @@ TEST(TestFourQ, SignTickVoteBatchScoresMatchEccnorm)
         point_extproj_t R, Rs; incrSignPointFromBase(base, R); copyMem(Rs, R, sizeof(R));
         for (int b = 0; b < 3; b++)
         {
-            unsigned int scores[INCR_SIGN_BATCH];
-            incrSignBatchScores(R, scores);
+            f2elm_t y[INCR_SIGN_BATCH];
+            incrSignBatchY(R, y);
             for (unsigned int i = 0; i < INCR_SIGN_BATCH; i++)
             {
-                EXPECT_EQ(scores[i], incrSignScore(Rs)) << " it " << it << " batch " << b << " i " << i;
+                point_extproj_t c; copyMem(c, Rs, sizeof(c));
+                point_t a; eccnorm(c, a);
+                EXPECT_EQ(memcmp(y[i], a->y, sizeof(f2elm_t)), 0) << " it " << it << " batch " << b << " i " << i;
                 eccadd(gIncrSignG, Rs);
             }
             EXPECT_EQ(memcmp(R, Rs, sizeof(R)), 0);
@@ -827,76 +826,68 @@ TEST(TestFourQ, SignTickVoteBatchScoresMatchEccnorm)
     }
 }
 
-// Same base -> same winning offset, encode(R) and R as the serial search, with the hit placed at
-// batch positions 0, 1, 63 and the boundaries of the 2nd and 3rd batch.
-TEST(TestFourQ, SignTickVoteBatchSearchMatchesSerial)
+// incrSignS gives the s of signWithRandomK_finishHalf, for a nonce r (with encode(R)) and for order - r (with encode(-R),
+// which is encode(R) with the sign bit flipped). The finished signatures pass verify.
+TEST(TestFourQ, SignTickVoteFastSMatchesFinishHalf)
 {
     incrSignTestInit();
-    constexpr unsigned int target = 0x003FFFFF;
-    unsigned long long base[8];
-    for (int s = 0; s < 8; s++) base[s] = 0xD1B54A32D192ED03ull * (s + 3);
-    int runs = 0;
-    for (int it = 0; it < 200 && runs < 20; it++)
+    unsigned char subseed[32], privateKey[32], publicKey[32], kConst[64];
+    for (int i = 0; i < 32; i++) subseed[i] = (unsigned char)(0x21 + 3 * i);
+    getPrivateKey(subseed, privateKey);
+    getPublicKey(privateKey, publicKey);
+    KangarooTwelve(subseed, 32, kConst, 64);
+    unsigned long long kR2[4];
+    Montgomery_multiply_mod_order((unsigned long long*)kConst, Montgomery_Rprime, kR2);
+    Montgomery_multiply_mod_order(kR2, Montgomery_Rprime, kR2);
+    const unsigned long long zero[4] = { 0, 0, 0, 0 };
+
+    for (int it = 0; it < 50; it++)
     {
-        base[1] += it + 1;
-        point_extproj_t R0, R; incrSignPointFromBase(base, R0); copyMem(R, R0, sizeof(R));
-        unsigned char sig[64];
-        const unsigned long long hit = incrSignSearchSerial(R, sig, target, nullptr);
-        if (hit < 2 * INCR_SIGN_BATCH) continue;
-        runs++;
-        for (unsigned long long delta : {0ull, 1ull, 63ull, 64ull, 65ull, 127ull, 128ull})
+        unsigned long long nonce[2][4];
+        unsigned char seed[8] = { (unsigned char)it, 1, 2, 3, 4, 5, 6, 7 }, wide[64];
+        KangarooTwelve(seed, 8, wide, 64);
+        Montgomery_multiply_mod_order((unsigned long long*)wide, Montgomery_Rprime, nonce[0]);
+        Montgomery_multiply_mod_order(nonce[0], ONE, nonce[0]);
+        subtract_mod_order(zero, nonce[0], nonce[1]);
+
+        unsigned char rpm[96], encoded[2][32];
+        copyMem(rpm + 32, publicKey, 32);
+        for (int i = 0; i < 32; i++) rpm[64 + i] = (unsigned char)(it + 5 * i);
+        for (int neg = 0; neg < 2; neg++)
         {
-            point_extproj_t A, B; copyMem(A, R0, sizeof(A));
-            for (unsigned long long j = 0; j < hit - delta; j++) eccadd(gIncrSignG, A);
-            copyMem(B, A, sizeof(B));
-            unsigned char sa[64], sb[64];
-            const unsigned long long oa = incrSignSearchSerial(A, sa, target, nullptr);
-            const unsigned long long ob = incrSignSearchBatch(B, sb, target, nullptr);
-            EXPECT_EQ(oa, delta);
-            EXPECT_EQ(ob, oa) << " delta " << delta;
-            EXPECT_EQ(memcmp(sa, sb, 32), 0) << " delta " << delta;
-            EXPECT_EQ(memcmp(A, B, sizeof(A)), 0) << " delta " << delta;
+            unsigned long long r[8] = { nonce[neg][0], nonce[neg][1], nonce[neg][2], nonce[neg][3], 0, 0, 0, 0 };
+            point_t R; ecc_mul_fixed(r, R); encode(R, encoded[neg]);
+            copyMem(rpm, encoded[neg], 32);
+            unsigned long long s[4];
+            incrSignS(kR2, nonce[neg], rpm, s);
+            unsigned char signature[64];
+            copyMem(signature, encoded[neg], 32);
+            signWithRandomK_finishHalf(kConst, publicKey, rpm + 64, r, signature);
+            EXPECT_EQ(memcmp(s, signature + 32, 32), 0) << " it " << it << " neg " << neg;
+            EXPECT_TRUE(verify(publicKey, rpm + 64, signature)) << " it " << it << " neg " << neg;
         }
+        encoded[0][31] ^= 0x80;
+        EXPECT_EQ(memcmp(encoded[0], encoded[1], 32), 0) << " it " << it;
     }
-    EXPECT_EQ(runs, 20);
 }
 
-TEST(TestFourQ, SignTickVoteBatchSearchBailsOnDone)
+TEST(TestFourQ, SignTickVoteBailsOnDone)
 {
     incrSignTestInit();
-    unsigned long long base[8] = { 1, 2, 3, 4, 5, 6, 7, 8 };
-    unsigned char sig[64];
+    unsigned char subseed[32], privateKey[32], publicKey[32], msg[32], sig[64];
+    for (int i = 0; i < 32; i++) { subseed[i] = (unsigned char)(0x5A + i); msg[i] = (unsigned char)(0xA5 - i); }
+    getPrivateKey(subseed, privateKey);
+    getPublicKey(privateKey, publicKey);
     {
         volatile int done = 1;
-        point_extproj_t R; incrSignPointFromBase(base, R);
-        EXPECT_EQ(incrSignSearchBatch(R, sig, 0, &done), 0ull);
+        signWithRandomK_incremental(subseed, publicKey, msg, sig, 0, &done);
     }
     {
         // another racer finishes mid-search; target 0 practically never hits
         volatile int done = 0;
-        point_extproj_t R; incrSignPointFromBase(base, R);
         std::thread racer([&] { std::this_thread::sleep_for(std::chrono::milliseconds(20)); done = 1; });
-        const unsigned long long offset = incrSignSearchBatch(R, sig, 0, &done);
+        signWithRandomK_incremental(subseed, publicKey, msg, sig, 0, &done);
         racer.join();
-        EXPECT_GT(offset, 0ull);
-        EXPECT_EQ(offset % INCR_SIGN_BATCH, 0ull);
-    }
-}
-
-TEST(TestFourQ, SignTickVoteBatchedPassesVerify)
-{
-    incrSignTestInit();
-    unsigned char subseed[32], privateKey[32], publicKey[32], msg[32];
-    for (int i = 0; i < 32; i++) { subseed[i] = (unsigned char)(0x5A + i); msg[i] = (unsigned char)(0xA5 - i); }
-    getPrivateKey(subseed, privateKey);
-    getPublicKey(privateKey, publicKey);
-    constexpr unsigned int target = 0x07FFFFFFU;
-    for (int it = 0; it < 100; it++)
-    {
-        unsigned char m2[32], s2[64];
-        for (int i = 0; i < 32; i++) m2[i] = (unsigned char)(msg[i] ^ (unsigned char)(it * 7 + i));
-        signWithRandomK_incremental<true>(subseed, publicKey, m2, s2, target);
-        EXPECT_TRUE(verify(publicKey, m2, s2));
-        EXPECT_LE(_byteswap_ulong(((unsigned int*)s2)[0]), target);
+        EXPECT_EQ(done, 1);
     }
 }
