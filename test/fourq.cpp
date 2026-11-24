@@ -783,16 +783,17 @@ TEST(TestFourQ, SignTickVoteNonceSecretWithBrokenRdrand)
         // Same R for different keys means the nonce does not depend on the key.
         EXPECT_NE(memcmp(sigA, sigB, 32), 0) << "mode " << mode;
 
-        // The nonce base is K12(K12(subseed)[32..64] || RDRAND || msg); the public part alone must not reach R.
-        unsigned char k[64], in[96];
+        // The nonce base is K12(K12(subseed)[32..64] || RDRAND || msg || target); the public part alone must not reach R.
+        unsigned char k[64], in[100];
         unsigned long long base[8];
         KangarooTwelve(subseedA, 32, k, 64);
         copyMem(in, k + 32, 32);
         for (int j = 0; j < 4; j++) ((unsigned long long*)(in + 32))[j] = mode ? 0x0123456789ABCDEFULL : 0;
         copyMem(in + 64, msg, 32);
-        KangarooTwelve(in, 96, (unsigned char*)base, 64);
+        *((unsigned int*)(in + 96)) = TARGET_TICK_VOTE_SIGNATURE;
+        KangarooTwelve(in, 100, (unsigned char*)base, 64);
         EXPECT_TRUE(nonceWalkReachesR(base, sigA, 4096)) << "mode " << mode;
-        KangarooTwelve(in + 32, 64, (unsigned char*)base, 64);
+        KangarooTwelve(in + 32, 68, (unsigned char*)base, 64);
         EXPECT_FALSE(nonceWalkReachesR(base, sigA, 4096)) << "mode " << mode;
 
         signWithRandomK(subseedA, pubA, msg, sigA2);
@@ -812,6 +813,51 @@ TEST(TestFourQ, SignTickVoteNonceSecretWithBrokenRdrand)
 
     fakeRdrandMode = -1;
     fakeRdrandFailsLeft = 0;
+}
+
+// With broken RDRAND the same vote signed under two targets must not use nearby nonces (two signatures of one key
+// with a known nonce difference reveal the private key); under one target it must give the identical signature.
+TEST(TestFourQ, SignTickVoteNonceDependsOnTarget)
+{
+#if defined (__AVX512F__)
+    initAVX512FourQConstants();
+#endif
+    initIncrementalSignG();
+
+    constexpr unsigned int targets[2] = { 0x07FFFFFFU, 0x03FFFFFFU };
+    unsigned char subseed[32], pub[32], priv[32], msg[32];
+    for (int i = 0; i < 32; i++) { subseed[i] = (unsigned char)(0x21 + i); msg[i] = (unsigned char)(0x6D ^ i); }
+    getPrivateKey(subseed, priv); getPublicKey(priv, pub);
+
+    for (int mode = 0; mode <= 1; mode++)
+    {
+        fakeRdrandMode = mode;
+        unsigned char sig[2][64], again[64], k[64], in[100];
+        unsigned long long base[2][8];
+        KangarooTwelve(subseed, 32, k, 64);
+        copyMem(in, k + 32, 32);
+        for (int j = 0; j < 4; j++) ((unsigned long long*)(in + 32))[j] = mode ? 0x0123456789ABCDEFULL : 0;
+        copyMem(in + 64, msg, 32);
+        for (int t = 0; t < 2; t++)
+        {
+            signWithRandomK_incremental(subseed, pub, msg, sig[t], targets[t]);
+            EXPECT_TRUE(verify(pub, msg, sig[t])) << "mode " << mode;
+            signWithRandomK_incremental(subseed, pub, msg, again, targets[t]);
+            EXPECT_EQ(memcmp(sig[t], again, 64), 0) << "mode " << mode;
+            *((unsigned int*)(in + 96)) = targets[t];
+            KangarooTwelve(in, 100, (unsigned char*)base[t], 64);
+        }
+        for (int t = 0; t < 2; t++)
+        {
+            EXPECT_TRUE(nonceWalkReachesR(base[t], sig[t], 4096)) << "mode " << mode;
+            EXPECT_FALSE(nonceWalkReachesR(base[t], sig[t ^ 1], 4096)) << "mode " << mode;
+        }
+        // signWithRandomK does not search; its nonce must not be the base of a search either
+        signWithRandomK(subseed, pub, msg, again);
+        EXPECT_FALSE(nonceWalkReachesR(base[0], again, 4096)) << "mode " << mode;
+        EXPECT_FALSE(nonceWalkReachesR(base[1], again, 4096)) << "mode " << mode;
+    }
+    fakeRdrandMode = -1;
 }
 
 static void incrSignTestInit()

@@ -1839,19 +1839,21 @@ static void sign(const unsigned char* subseed, const unsigned char* publicKey, c
 #define FOURQ_RDRAND64_STEP _rdrand64_step
 #endif
 
-// Nonce base = K12(k[32..64] || RDRAND || messageDigest), k = K12(subseed, 64). The secret half of k keeps the
-// nonce unpredictable even if RDRAND fails or is predictable; with RDRAND fully failing it degrades to sign()'s
-// deterministic per-(key, message) nonce, which is still safe.
-static void signRandomNonceBase(const unsigned char* k, const unsigned char* messageDigest, unsigned long long* base)
+// Nonce base = K12(k[32..64] || RDRAND || messageDigest || target), k = K12(subseed, 64). The secret half of k keeps
+// the nonce unpredictable even if RDRAND fails or is predictable; with RDRAND fully failing it degrades to a
+// deterministic per-(key, message, target) nonce, which is still safe. target is part of it because the nonce search
+// stops at a target-dependent offset from base: one base under two targets would give two related nonces.
+static void signRandomNonceBase(const unsigned char* k, const unsigned char* messageDigest, unsigned int target, unsigned long long* base)
 {
-    unsigned char in[96];
+    unsigned char in[100];
     *((m256i*)in) = *((m256i*)(k + 32));
     for (int j = 32; j < 64; j += 8)
     {
         for (int retry = 0; retry < 10 && !FOURQ_RDRAND64_STEP((unsigned long long*)(in + j)); retry++);
     }
     *((m256i*)(in + 64)) = *((m256i*)messageDigest);
-    KangarooTwelve(in, 96, (unsigned char*)base, 64);
+    *((unsigned int*)(in + 96)) = target;
+    KangarooTwelve(in, 100, (unsigned char*)base, 64);
 }
 
 // same as sign() but the nonce also mixes in RDRAND output (see signRandomNonceBase)
@@ -1864,7 +1866,7 @@ static void signWithRandomK(const unsigned char* subseed, const unsigned char* p
     unsigned char k[64], h[64], temp[32 + 64];
     unsigned long long r[8];
     KangarooTwelve((unsigned char*)subseed, 32, k, 64);
-    signRandomNonceBase(k, messageDigest, r);
+    signRandomNonceBase(k, messageDigest, 0, r); // no search; 0 is not a valid search target
     *((__m256i*)(temp + 64)) = *((__m256i*)messageDigest);
 
     ecc_mul_fixed(r, R);
@@ -2044,7 +2046,7 @@ static void signWithRandomK_incremental(const unsigned char* subseed, const unsi
     unsigned char kConst[64];
     KangarooTwelve((unsigned char*)subseed, 32, kConst, 64);
     unsigned long long base[8];
-    signRandomNonceBase(kConst, messageDigest, base);
+    signRandomNonceBase(kConst, messageDigest, target, base);
 
     static const unsigned long long zero[4] = { 0, 0, 0, 0 };
     unsigned long long kR[4], nonce[2][4];                                   // nonce[0] = r, nonce[1] = order - r
